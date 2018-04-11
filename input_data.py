@@ -7,6 +7,14 @@ import urllib
 import numpy
 import numpy as np
 
+import sys
+if (sys.version_info > (3, 0)):
+    from functools import reduce
+    from urllib.request import urlretrieve
+else:
+    from urllib import urlretrieve
+
+
 SOURCE_URL = 'http://yann.lecun.com/exdb/mnist/'
 
 
@@ -16,7 +24,7 @@ def maybe_download(filename, work_directory):
     os.mkdir(work_directory)
   filepath = os.path.join(work_directory, filename)
   if not os.path.exists(filepath):
-    filepath, _ = urllib.urlretrieve(SOURCE_URL + filename, filepath)
+    filepath, _ = urlretrieve(SOURCE_URL + filename, filepath)
     statinfo = os.stat(filepath)
     print('Succesfully downloaded', filename, statinfo.st_size, 'bytes.')
   return filepath

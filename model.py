@@ -69,7 +69,7 @@ class Model:
         self.R = tf.concat([self.R_L, self.R_B], axis=0, name='R')
         
         num__L, num__B = tf.shape(self.X_L)[0], tf.shape(self.X_B)[0]
-        __L, __B = lambda(dat): dat[:num__L], lambda(dat): dat[num__L:]
+        __L, __B = lambda dat: dat[:num__L], lambda dat: dat[num__L:]
         
         with tf.name_scope('classifier'):
             self.T, self.T_logits, self.theta_T = create_fcnet(self.X, layers+[dim_t], tf.nn.relu, actvn_fn)
@@ -156,6 +156,7 @@ class Optimizer:
         if self.bset is None or i%2:
             QQ = X if self.btree_dists_in_ambient else sess.run(model.T, {model.X_L:X})
             bset, pts = build_boundary_set_ex(QQ, R)
+            pts = np.array(pts)
             self.bset = (X[pts], R[pts])
             sess.run(self.setsize_assgn, {self.setsize_ph:bset.size})
         else:
@@ -210,7 +211,7 @@ class ImageMan:
     def on_train(self, sess, add_summary, i, X, R): return
 
     
-time_id = lambda: time.strftime("%Y%m%d-%H:%M:%S", time.gmtime(time.mktime(time.gmtime())))
+time_id = lambda: time.strftime("%Y%m%d-%H%M%S", time.gmtime(time.mktime(time.gmtime())))
 
 
 class SessMan:
@@ -223,10 +224,10 @@ class SessMan:
             print('*********NOT A REAL RUN!')
             return
 
-        cache_root = '../cache'
+        cache_root = os.path.join('..', 'cache')
 
         def mkdir():
-            new_dir = '%s/%s_%s'%(cache_root,time_id(),run_id)
+            new_dir = os.path.join(cache_root, '%s_%s'%(time_id(),run_id))
             if not os.path.exists(new_dir): os.makedirs(new_dir)
             return new_dir
         
@@ -275,7 +276,7 @@ class SessMan:
 
     def save(self, epoch):
         if self.real_run:
-            self.saver.save(self.sess, '%s/model.ckpt'%self.cache_dir, epoch)
+            self.saver.save(self.sess, os.path.join(self.cache_dir, 'model.ckpt'), epoch)
 
         
 from tqdm import tqdm
