@@ -174,11 +174,42 @@ import time, os, random, scipy
 class ImageMan:
     def __init__(self, sman, model, D_T):
         
+        X_T, Y_T = D_T.images, np.argmax(D_T.labels, axis=1)
         im_len = 28
+
+        ## displaying embedding
+        embd_side = 32
+        embd_count = embd_side**2
+        idx = np.random.randint(D_T.num_examples, size=embd_count)
+        self.X_E, self.Y_E = X_T[idx,:], Y_T[idx]
+        self.embd_var = tf.Variable(tf.zeros([embd_count, model.T.get_shape().as_list()[1]]), name="embedding", trainable=False)
+        self.assignment = self.embd_var.assign(model.T)
+
+        LABELS, SPRITES = 'labels_%d.tsv'%embd_count, 'sprite_%d.png'%embd_count
+        #SPRITES = os.path.join(os.getcwd(), "sprite_1024.png")
+        config = tf.contrib.tensorboard.plugins.projector.ProjectorConfig()
+        embedding_config = config.embeddings.add()
+        embedding_config.tensor_name = self.embd_var.name
+        embedding_config.sprite.image_path = SPRITES
+        embedding_config.metadata_path = LABELS
+        embedding_config.sprite.single_image_dim.extend([im_len, im_len])
+
+        if sman.cache_dir:
+            with tf.summary.FileWriter(sman.cache_dir) as writer:
+                tf.contrib.tensorboard.plugins.projector.visualize_embeddings(writer, config)
+
+            lab_path = os.path.join(sman.cache_dir,'labels_%d.tsv'%embd_count)
+            np.savetxt(lab_path, self.Y_E, fmt='%d', delimiter=',')
+
+            spr_path = os.path.join(sman.cache_dir,'sprite_%d.png'%embd_count)
+            spr_im = self.X_E.reshape(embd_side, embd_side, im_len, im_len).swapaxes(1,2).reshape(embd_side*im_len, embd_side*im_len)
+            scipy.misc.imsave(spr_path, 1-spr_im)
+
+
+        ## displaying images
         num_patterns = 10
         num_from_each = 1
         self.model = model
-        X_T, Y_T = D_T.images, np.argmax(D_T.labels, axis=1)
         B_T = np.empty((0,784))
         R_T = np.empty((0,10))
         for ll in range(10):
@@ -202,8 +233,9 @@ class ImageMan:
         #self.summary_test_op = tf.summary.merge(summary_test)
             
     def on_test(self, sess, add_summary, i, X, R):
-        return
         model = self.model
+        sess.run(self.assignment, feed_dict={model.X_L: self.X_E})
+        return
         add_summary(sess.run(self.summary_test_op, feed_dict={model.X_L: self.B_T, model.R_L: self.R_T}), i)
 
     def on_new_epoch(self, sess, last_epoch, num_epochs): pass
