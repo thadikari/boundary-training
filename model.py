@@ -255,10 +255,10 @@ class SessMan:
             print('*********NOT A REAL RUN!')
             return
 
-        cache_root = '../cache'
+        cache_root = os.path.join('..', 'cache')
 
         def mkdir():
-            new_dir = '%s/%s_%s'%(cache_root,time_id(),run_id)
+            new_dir = os.path.join(cache_root, '%s_%s'%(time_id(),run_id))
             if not os.path.exists(new_dir): os.makedirs(new_dir)
             return new_dir
         
@@ -307,7 +307,7 @@ class SessMan:
 
     def save(self, epoch):
         if self.real_run:
-            self.saver.save(self.sess, '%s/model.ckpt'%self.cache_dir, epoch)
+            self.saver.save(self.sess, os.path.join(self.cache_dir, 'model.ckpt'), epoch)
 
         
 from tqdm import tqdm
