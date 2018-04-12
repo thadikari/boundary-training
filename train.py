@@ -1,8 +1,35 @@
 #!/opt/tensorflow/bin/python
 
-from model import *
-import input_data
+import tensorflow as tf
+from tqdm import tqdm
 
+import input_data
+from model import Model, Optimizer, ImageMan, SessMan, reset_all
+
+
+class Trainer:
+    def __init__(self, dataset):
+        self.ds = dataset
+        
+    def train(self, sman, modules, num_epochs, batch_size):
+        sess = sman.sess
+        last_epoch = sman.last_epoch
+        
+        iters_per_epoch = int(self.ds.train.unlabeled_ds.num_examples/batch_size)
+        iter_start, iter_end = iters_per_epoch*last_epoch, iters_per_epoch*num_epochs
+        
+        for i in tqdm(range(iter_start, iter_end)):
+            for module in modules:
+                module.on_train(sess, sman.add_summary, i, *self.ds.train.labeled_ds.next_batch(batch_size))
+
+            if i % iters_per_epoch == 0:
+                last_epoch = int(i/iters_per_epoch)
+                sman.save(last_epoch)
+                for module in modules:
+                    module.on_test(sess, sman.add_summary, i, self.ds.test.images, self.ds.test.labels)
+                for module in modules:
+                    module.on_new_epoch(sess, last_epoch, num_epochs)
+        
 #for sigma in [45,55,60,70]:
 reset_all()
 real_run = 1
