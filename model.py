@@ -99,11 +99,10 @@ class RateUpdater:
 from boundary import build_boundary_set_ex
 
 class Optimizer:
-    def __init__(self, model, btree_dists_in_ambient):
+    def __init__(self, model):
         
         self.bset = None
         self.model = model
-        self.btree_dists_in_ambient = btree_dists_in_ambient
         smr_tr, smr_ts = [], []
         smr_scl = lambda name,opr,stp: stp.append(tf.summary.scalar(name,opr))
         smr_hst = lambda name,opr,stp: None#stp.append(tf.summary.histogram(name,opr))
@@ -154,8 +153,8 @@ class Optimizer:
     def on_train(self, sess, add_summary, i, X, R):
         model = self.model
         if self.bset is None or i%2:
-            QQ = X if self.btree_dists_in_ambient else sess.run(model.T, {model.X_L:X})
-            bset, pts = build_boundary_set_ex(QQ, R)
+            T = sess.run(model.T, {model.X_L:X})
+            bset, pts = build_boundary_set_ex(T, R)
             self.bset = (X[pts], R[pts])
             sess.run(self.setsize_assgn, {self.setsize_ph:bset.size})
         else:
@@ -247,6 +246,22 @@ time_id = lambda: time.strftime("%Y%m%d-%H:%M:%S", time.gmtime(time.mktime(time.
 
 class SessMan:
     def __init__(self, run_id, new_run, real_run):
+
+        cache_root = os.path.join('..', 'cache')
+        def mkdir():
+            new_dir = os.path.join(cache_root, '%s_%s'%(time_id(),run_id))
+            if not os.path.exists(new_dir): os.makedirs(new_dir)
+            return new_dir
+        
+        def load_cached(cache_dir):
+            self.ckpt = tf.train.get_checkpoint_state(cache_dir)  # get latest checkpoint (if any)
+            if self.ckpt and self.ckpt.model_checkpoint_path: # should continue from this checkpoint
+                print('Loaded checkpoint. Caching in EXISTING dir: %s'%cache_dir)
+            else:
+                #cache_dir = mkdir()
+                print('No checkpoints found. Caching in EXISTING dir: %s'%cache_dir)
+                self.ckpt = None
+
         self.real_run = real_run
         self.cache_dir = None
         self.ckpt = None
@@ -254,13 +269,6 @@ class SessMan:
         if not self.real_run:
             print('*********NOT A REAL RUN!')
             return
-
-        cache_root = os.path.join('..', 'cache')
-
-        def mkdir():
-            new_dir = os.path.join(cache_root, '%s_%s'%(time_id(),run_id))
-            if not os.path.exists(new_dir): os.makedirs(new_dir)
-            return new_dir
         
         if new_run:
             cache_dir = mkdir()
@@ -269,16 +277,11 @@ class SessMan:
             if len(os.listdir(cache_root))==0: # cache dir empty
                 cache_dir = mkdir()
                 print('No runs found. Starting NEW run. Caching in NEW dir: %s'%cache_dir)
-            else:
+            else: # get the last updated dir
                 cache_dir = max([os.path.join(cache_root,d) for d in os.listdir(cache_root)], key=os.path.getmtime)
-                self.ckpt = tf.train.get_checkpoint_state(cache_dir)  # get latest checkpoint (if any)
-                if self.ckpt and self.ckpt.model_checkpoint_path: # should continue from this checkpoint
-                    print('Continuing from checkpoint. Caching in EXISTING dir: %s'%cache_dir)
-                else:
-                    cache_dir = mkdir()
-                    print('No checkpoints found. Caching in NEW dir: %s'%cache_dir)
-                    self.ckpt = None
-
+                print('Attempting to load from last updated dir: %s'%cache_dir)
+                load_cached(cache_dir)
+                
         self.cache_dir = cache_dir
 
     def load(self):
@@ -314,3 +317,15 @@ def reset_all(seed=0):
     np.random.seed(seed)
     tf.reset_default_graph()
     tf.set_random_seed(seed)
+
+import input_data
+def load_mnist():
+    return input_data.read_mnist('../data', one_hot=True)
+
+def get_default_model():
+    actvn_fn = tf.identity
+    sigma = 60
+    model = Model(dim_x=784, dim_r=10, dim_t=20,
+                  layers=[400,400], actvn_fn=actvn_fn, sigma=sigma
+                  )
+    return model

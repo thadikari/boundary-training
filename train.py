@@ -1,10 +1,7 @@
 #!/opt/tensorflow/bin/python
 
-import tensorflow as tf
 from tqdm import tqdm
-
-import input_data
-from model import Model, Optimizer, ImageMan, SessMan, reset_all
+from model import *
 
 
 class Trainer:
@@ -30,22 +27,15 @@ class Trainer:
                 for module in modules:
                     module.on_new_epoch(sess, last_epoch, num_epochs)
         
-#for sigma in [45,55,60,70]:
 reset_all()
 real_run = 1
 new_run = 1
 num_epochs = 1000
-actvn_fn = tf.identity
-sigma = 1
-btree_dists_in_ambient = 0
 
-model = Model(dim_x=784, dim_r=10, dim_t=20,
-              layers=[400,400], actvn_fn=actvn_fn, sigma=sigma
-              )
-optimizer = Optimizer(model, btree_dists_in_ambient=btree_dists_in_ambient)
-
-sman = SessMan(run_id='actvn_%s_sigma_%d_benchmark'%(actvn_fn.__name__,1), new_run=new_run, real_run=real_run)
-trainer = Trainer(input_data.read_mnist("../data", one_hot=True))
+model = get_default_model()
+optimizer = Optimizer(model)
+sman = SessMan(run_id='clean_version', new_run=0, real_run=real_run)
+trainer = Trainer(load_mnist())
 imageman = ImageMan(sman, model, trainer.ds.test)
 sman.load()
-trainer.train(sman, modules=[optimizer, imageman], num_epochs=num_epochs, batch_size=100)
+trainer.train(sman, modules=[optimizer, imageman], num_epochs=num_epochs, batch_size=128)
