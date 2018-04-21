@@ -34,7 +34,7 @@ def create_fcnet(acts_p, layers, inner_actvn_fn, last_actvn_fn):
     log(' -> '.join([str(get_dim1(acts_p))] + [str(it) for it in layers]))
     theta_lst = []
     for l in range(len(layers)):
-        with tf.name_scope('layer_%d'%(l+1)):
+        with my_name_scope('layer_%d'%(l+1)):
             acts, logits, theta = create_layer__(acts_p, layers[l], inner_actvn_fn)
             theta_lst.extend(theta)
             acts_p = acts
@@ -55,6 +55,17 @@ def pdist2(X, Y=None): # dimensions should be, X: NX x C and Y: NY x C
     return dists2
     #return tf.sqrt(dists2 + 1e-10)
     
+
+class my_name_scope(object):
+    def __init__(self, name):
+        cur = tf.get_default_graph().get_name_scope()
+        self.ns = tf.name_scope(cur + ('' if len(cur)==0 else '/') + name + '/')
+    def __enter__(self):
+        self.ns.__enter__()
+        return self.ns
+    def __exit__(self, type, value, traceback):
+        self.ns.__exit__(type, value, traceback)
+    
     
 class BoundaryModel:
     def __init__(self, dim_x, dim_r, dim_t, layers, actvn_fn, sigma):
@@ -72,10 +83,10 @@ class BoundaryModel:
         num__L, num__B = tf.shape(self.X_L)[0], tf.shape(self.X_B)[0]
         __L, __B = lambda(dat): dat[:num__L], lambda(dat): dat[num__L:]
         
-        with tf.name_scope('classifier'):
+        with my_name_scope('classifier'):
             self.T, self.T_logits, self.theta_T = create_fcnet(self.X, layers+[dim_t], tf.nn.relu, actvn_fn)
             
-        with tf.name_scope('projection'):
+        with my_name_scope('projection'):
             T_L, T_B = __L(self.T), __B(self.T)
             dists2 = pdist2(T_L, T_B)
             smax = tf.nn.softmax(-dists2/sigma)
@@ -99,37 +110,39 @@ class RateUpdater:
 
 from boundary import build_boundary_set_ex
 
+smr_scl = lambda name,opr,stp: stp.append(tf.summary.scalar(name,opr))
+smr_hst = lambda name,opr,stp: None#stp.append(tf.summary.histogram(name,opr))
+
+def error_calc(real_labels, pred_logits):
+    not_eql = tf.not_equal(tf.argmax(real_labels,axis=1), tf.argmax(pred_logits,axis=1))
+    return 100.*tf.reduce_mean(tf.cast(not_eql, 'float'))
+
+    
 class BoundaryOptimizer:
     def __init__(self, model):
         
         self.bset = None
         self.model = model
         smr_tr, smr_ts = [], []
-        smr_scl = lambda name,opr,stp: stp.append(tf.summary.scalar(name,opr))
-        smr_hst = lambda name,opr,stp: None#stp.append(tf.summary.histogram(name,opr))
-        
-        def error_calc(real_labels, pred_logits):
-            not_eql = tf.not_equal(tf.argmax(real_labels,axis=1), tf.argmax(pred_logits,axis=1))
-            return 100.*tf.reduce_mean(tf.cast(not_eql, 'float'))
 
-        with tf.name_scope('classifier/R_hat_T'):
+        with my_name_scope('classifier/R_hat_T'):
             cor = tf.clip_by_value(model.R_hat_T,1e-8,1.0) # self.R_hat_T + 1e-8 #
             ttf = model.R_L * tf.log(cor)
             loss_label = -tf.reduce_mean(ttf)
             smr_scl('loss', loss_label, smr_tr)
 
-            with tf.name_scope('error'):
+            with my_name_scope('error'):
                 err = error_calc(model.R_L, model.R_hat_T)
                 smr_scl('train', err, smr_tr)
                 smr_scl('test', err, smr_ts)
 
-        with tf.name_scope('boundary_set'):
+        with my_name_scope('boundary_set'):
             self.setsize_ph = tf.placeholder(tf.float32)
             setsize = tf.Variable(0., trainable=False)
             self.setsize_assgn = setsize.assign(self.setsize_ph)
             smr_scl('size', setsize, smr_tr)
             
-        with tf.name_scope('training'):
+        with my_name_scope('training'):
             self.sub_list = []
             s_rate = .001
             learning_rate = tf.Variable(s_rate, trainable=False, name='learning_rate')
@@ -165,6 +178,64 @@ class BoundaryOptimizer:
         
             if i%500:
                 add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
+
+
+class BaselineModel:
+    def __init__(self, dim_x, dim_r, dim_t, layers):
+    
+        #self.dim_x = dim_x
+        self.X = tf.placeholder_with_default(tf.zeros([0,dim_x], tf.float32), shape=(None, dim_x), name='X')
+        self.R = tf.placeholder_with_default(tf.zeros([0,dim_r], tf.float32), shape=(None, dim_r), name='R')
+        
+        with my_name_scope('classifier'):
+            self.R_hat, self.R_hat_logits, self.theta_R_hat = create_fcnet(self.X, layers+[dim_t, dim_r], tf.nn.relu, tf.nn.softmax)
+            
+        self.T = self.R_hat_logits
+            
+                
+class BaselineOptimizer:
+    def __init__(self, model):
+        
+        self.model = model
+        smr_tr, smr_ts = [], []
+        
+        with my_name_scope('classifier/R_hat_T'):
+            loss_label = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=model.R, logits=model.R_hat_logits))
+            smr_scl('loss', loss_label, smr_tr)
+
+            with my_name_scope('error'):
+                err = error_calc(model.R, model.R_hat)
+                smr_scl('train', err, smr_tr)
+                smr_scl('test', err, smr_ts)
+
+        with my_name_scope('training'):
+            self.sub_list = []
+            s_rate = .001
+            learning_rate = tf.Variable(s_rate, trainable=False, name='learning_rate')
+            smr_scl('learning_rate', learning_rate, smr_ts)
+            self.sub_list.append(RateUpdater(s_rate, learning_rate))
+            self.opt = tf.train.AdamOptimizer(learning_rate, beta1=.5).minimize(loss=loss_label, var_list=model.theta_R_hat)
+            
+        self.summary_train_op = tf.summary.merge(smr_tr)
+        self.summary_test_op = tf.summary.merge(smr_ts)
+        
+    def on_new_epoch(self, sess, last_epoch, num_epochs):
+        for it in self.sub_list:
+            it.on_new_epoch(sess, last_epoch, num_epochs)
+            
+    def on_test(self, sess, add_summary, i, X, R):
+        model = self.model
+        feed_dict = {model.X:X, model.R:R}
+        summary = sess.run(self.summary_test_op, feed_dict=feed_dict)
+        add_summary(summary, i)
+    
+    def on_train(self, sess, add_summary, i, X, R):
+        model = self.model
+        feed_dict = {model.X:X, model.R:R}
+        sess.run(self.opt, feed_dict=feed_dict)
+    
+        if i%500:
+            add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
 
         
 import time, os, random, scipy
@@ -234,14 +305,14 @@ class ImageMan:
             
     def on_test(self, sess, add_summary, i, X, R):
         model = self.model
-        sess.run(self.assignment, feed_dict={model.X_L: self.X_E})
+        sess.run(self.assignment, feed_dict={model.X: self.X_E})
         return
         add_summary(sess.run(self.summary_test_op, feed_dict={model.X_L: self.B_T, model.R_L: self.R_T}), i)
 
     def on_new_epoch(self, sess, last_epoch, num_epochs): pass
     def on_train(self, sess, add_summary, i, X, R): return
 
-    
+            
 time_id = lambda: time.strftime("%Y%m%d-%H:%M:%S", time.gmtime(time.mktime(time.gmtime())))
 
 
@@ -332,4 +403,9 @@ def get_boundary_model():
     sigma = 60
     model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma)
     optimizer = BoundaryOptimizer(model)
+    return model, optimizer
+
+def get_baseline_model():
+    model = BaselineModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400])
+    optimizer = BaselineOptimizer(model)
     return model, optimizer
