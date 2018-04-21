@@ -34,8 +34,8 @@ num_epochs = 1000
 
 model = get_default_model()
 optimizer = Optimizer(model)
-sman = SessMan(run_id='clean_version', new_run=0, real_run=real_run)
-trainer = Trainer(load_mnist())
+sman = SessMan(run_id='clean_version_sqrt', new_run=new_run, real_run=real_run)
+trainer = Trainer(load_mnist_fashion())
 imageman = ImageMan(sman, model, trainer.ds.test)
 sman.load()
 trainer.train(sman, modules=[optimizer, imageman], num_epochs=num_epochs, batch_size=128)

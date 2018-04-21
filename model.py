@@ -53,6 +53,7 @@ def pdist2(X, Y=None): # dimensions should be, X: NX x C and Y: NY x C
     Y_T = tf.tile(Y_, [NX, 1])
     dists2 = X_T + Y_T - 2 * tf.matmul(X,tf.transpose(X if Y is None else Y))
     return dists2
+    #return tf.sqrt(dists2 + 1e-10)
     
     
 class Model:
@@ -319,8 +320,12 @@ def reset_all(seed=0):
     tf.set_random_seed(seed)
 
 import input_data
-def load_mnist():
-    return input_data.read_mnist('../data', one_hot=True)
+
+def load_mnist_digits():
+    return input_data.read_mnist('../data/digits', one_hot=True, SOURCE_URL=input_data.SOURCE_DIGITS)
+
+def load_mnist_fashion():
+    return input_data.read_mnist('../data/fashion', one_hot=True, SOURCE_URL=input_data.SOURCE_FASHION)
 
 def get_default_model():
     actvn_fn = tf.identity
