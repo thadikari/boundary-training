@@ -32,8 +32,7 @@ real_run = 1
 new_run = 1
 num_epochs = 1000
 
-model = get_default_model()
-optimizer = Optimizer(model)
+model, optimizer = get_boundary_model()
 sman = SessMan(run_id='clean_version_sqrt', new_run=new_run, real_run=real_run)
 trainer = Trainer(load_mnist_fashion())
 imageman = ImageMan(sman, model, trainer.ds.test)

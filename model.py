@@ -56,7 +56,7 @@ def pdist2(X, Y=None): # dimensions should be, X: NX x C and Y: NY x C
     #return tf.sqrt(dists2 + 1e-10)
     
     
-class Model:
+class BoundaryModel:
     def __init__(self, dim_x, dim_r, dim_t, layers, actvn_fn, sigma):
     
         self.dim_x = dim_x
@@ -99,7 +99,7 @@ class RateUpdater:
 
 from boundary import build_boundary_set_ex
 
-class Optimizer:
+class BoundaryOptimizer:
     def __init__(self, model):
         
         self.bset = None
@@ -327,10 +327,9 @@ def load_mnist_digits():
 def load_mnist_fashion():
     return input_data.read_mnist('../data/fashion', one_hot=True, SOURCE_URL=input_data.SOURCE_FASHION)
 
-def get_default_model():
+def get_boundary_model():
     actvn_fn = tf.identity
     sigma = 60
-    model = Model(dim_x=784, dim_r=10, dim_t=20,
-                  layers=[400,400], actvn_fn=actvn_fn, sigma=sigma
-                  )
-    return model
+    model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma)
+    optimizer = BoundaryOptimizer(model)
+    return model, optimizer
