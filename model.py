@@ -108,7 +108,8 @@ class RateUpdater:
             #print last_epoch, self.rate_var.name, self.curr_val
         
 
-from boundary import build_boundary_set_ex
+from boundary import build_boundary_set_ex, build_boundary_tree
+import logging
 
 smr_scl = lambda name,opr,stp: stp.append(tf.summary.scalar(name,opr))
 smr_hst = lambda name,opr,stp: None#stp.append(tf.summary.histogram(name,opr))
@@ -119,8 +120,10 @@ def error_calc(real_labels, pred_logits):
 
     
 class BoundaryOptimizer:
-    def __init__(self, model):
+    def __init__(self, model, D_L):
         
+        self.D_L = D_L
+        self.logger = logging.getLogger('BoundaryOptimizer')
         self.bset = None
         self.model = model
         smr_tr, smr_ts = [], []
@@ -135,12 +138,16 @@ class BoundaryOptimizer:
                 err = error_calc(model.R_L, model.R_hat_T)
                 smr_scl('train', err, smr_tr)
                 smr_scl('test', err, smr_ts)
+                
+                self.test_error_big = tf.placeholder(tf.float32)
+                smr_scl('test_big', self.test_error_big, smr_ts)
 
         with my_name_scope('boundary_set'):
-            self.setsize_ph = tf.placeholder(tf.float32)
-            setsize = tf.Variable(0., trainable=False)
-            self.setsize_assgn = setsize.assign(self.setsize_ph)
-            smr_scl('size', setsize, smr_tr)
+            self.setsize_small = tf.shape(model.X_B)[0]
+            smr_scl('size_small', self.setsize_small, smr_tr)
+            
+            self.setsize_big = tf.placeholder(tf.float32)
+            smr_scl('size_big', self.setsize_big, smr_ts)
             
         with my_name_scope('training'):
             self.sub_list = []
@@ -158,25 +165,46 @@ class BoundaryOptimizer:
             it.on_new_epoch(sess, last_epoch, num_epochs)
             
     def on_test(self, sess, add_summary, i, X, R):
+        
+        if np.random.uniform()>.2:return
+        
         model = self.model
-        X_L, X_B, R_L, R_B = X, self.bset[0], R, self.bset[1]
-        feed_dict = {model.X_L:X_L, model.X_B:X_B, model.R_L:R_L, model.R_B:R_B}
+        X_L, X_B, R_L, R_B = X, self.bset[0], R, self.bset[1]        
+        
+        T = sess.run(model.T, {model.X_L:X})
+        def get_err(btree):
+            err = 0.
+            for tt, rr in zip(T, R):
+                err += (np.argmax(btree.infer_probs(tt, 1)) != np.argmax(rr))
+            test_error = 100.*err/X.shape[0]
+            return test_error
+        
+        perm = np.arange(self.D_L._num_examples)
+        np.random.shuffle(perm)
+        X_L, R_L = self.D_L.images[perm], self.D_L.labels[perm]
+        T_L = sess.run(model.T, {model.X_L:X_L})
+        btree_big = build_boundary_tree(T_L, R_L, X_L)
+        
+        test_error_big = get_err(btree_big)
+        feed_dict = {model.X_L:X_L, model.X_B:X_B, model.R_L:R_L, model.R_B:R_B, self.test_error_big:test_error_big, self.setsize_big:btree_big.size}
         summary = sess.run(self.summary_test_op, feed_dict=feed_dict)
         add_summary(summary, i)
+        
+        self.logger.info(str(['test_error_big: ', test_error_big, 'setsize_big', btree_big.size]))
+    
     
     def on_train(self, sess, add_summary, i, X, R):
         model = self.model
-        if self.bset is None or i%2:
+        if self.bset is None or i%2==0:
             T = sess.run(model.T, {model.X_L:X})
             bset, pts = build_boundary_set_ex(T, R)
             self.bset = (X[pts], R[pts])
-            sess.run(self.setsize_assgn, {self.setsize_ph:bset.size})
         else:
             X_L, X_B, R_L, R_B = X, self.bset[0], R, self.bset[1]
             feed_dict = {model.X_L:X_L, model.X_B:X_B, model.R_L:R_L, model.R_B:R_B}
             sess.run(self.opt, feed_dict=feed_dict)
         
-            if i%500:
+            if i%50:
                 add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
 
 
@@ -356,6 +384,14 @@ class SessMan:
                 
         self.cache_dir = cache_dir
 
+        logging.basicConfig(filename=os.path.join(self.cache_dir,'log.log'),
+                            filemode='a',
+                            format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
+                            datefmt='%H:%M:%S',
+                            level=logging.DEBUG)
+        logging.info('initialized logger to file')
+
+
     def load(self):
         self.sess = tf.Session()
         self.saver = tf.train.Saver()
@@ -398,11 +434,11 @@ def load_mnist_digits():
 def load_mnist_fashion():
     return input_data.read_mnist('../data/fashion', one_hot=True, SOURCE_URL=input_data.SOURCE_FASHION)
 
-def get_boundary_model():
+def get_boundary_model(D_L):
     actvn_fn = tf.identity
     sigma = 60
     model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma)
-    optimizer = BoundaryOptimizer(model)
+    optimizer = BoundaryOptimizer(model, D_L)
     return model, optimizer
 
 def get_baseline_model():
