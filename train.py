@@ -13,7 +13,7 @@ modt = 'set' #set/tree/baseline
 start_rate = 0.001
 sigma = 60
 
-run_id = '%s_%s_%dmb_%srate_%dsigma__dududud'%(dset, modt, batch_size, format_e(start_rate), sigma)
+run_id = '%s_%s_%dmb_%srate_%dsigma'%(dset, modt, batch_size, format_e(start_rate), sigma)
 trainer = Trainer(load_mnist(dset))
 model, optimizer = make_model(modt, start_rate, sigma, trainer.ds.train.labeled_ds)
 sman = SessMan(run_id=run_id, new_run=new_run, real_run=real_run)
