@@ -28,12 +28,12 @@ class Trainer:
                     module.on_new_epoch(sess, last_epoch, num_epochs)
         
 reset_all()
-real_run = 1
+real_run = 0
 new_run = 1
 num_epochs = 2000
 
 trainer = Trainer(load_mnist_fashion())
-model, optimizer = get_boundary_model(trainer.ds.train.labeled_ds)
+model, optimizer = make_set_model(trainer.ds.train.labeled_ds)
 sman = SessMan(run_id='fashion_boundary_2krun_1000MB_big_tree', new_run=new_run, real_run=real_run)
 imageman = ImageMan(sman, model, trainer.ds.test)
 sman.load()
