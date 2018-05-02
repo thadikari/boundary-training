@@ -15,6 +15,10 @@ def log(ss=''):
     splt = nscp.split('/')
     print('\t'*(len(splt)-1) + splt[-1] + ': ' + ss)
     
+def format_e(n):
+    a = '%E' % n
+    return a.split('E')[0].rstrip('0').rstrip('.') + 'E' + a.split('E')[1]
+
 get_dim1 = lambda vv: vv.get_shape().as_list()[1]
 
 def create_layer__(acts_p, dim_l, actvn_fn):
@@ -128,7 +132,7 @@ def calc_BT_err(btree, T, R):
 
     
 class BoundaryOptimizer:
-    def __init__(self, model, starting_lr, D_L):
+    def __init__(self, model, start_rate, D_L):
         self.model = model
         self.D_L = D_L
         self.logger = logging.getLogger('Optimizer')
@@ -152,9 +156,9 @@ class BoundaryOptimizer:
 
         with my_name_scope('training'):
             self.sub_list = []
-            learning_rate = tf.Variable(starting_lr, trainable=False, name='learning_rate')
+            learning_rate = tf.Variable(start_rate, trainable=False, name='learning_rate')
             smr_scl('learning_rate', learning_rate, self.smr_ts)
-            self.sub_list.append(RateUpdater(starting_lr, learning_rate))
+            self.sub_list.append(RateUpdater(start_rate, learning_rate))
             self.opt = tf.train.AdamOptimizer(learning_rate, beta1=.5).minimize(loss=loss_label, var_list=model.theta_T)
             
         self.summary_train_op = tf.summary.merge(self.smr_tr)
@@ -504,19 +508,19 @@ def load_mnist(dset):
     if dset=='digits': return input_data.read_mnist('../data/digits', one_hot=True, SOURCE_URL=input_data.SOURCE_DIGITS)
     if dset=='fashion': return input_data.read_mnist('../data/fashion', one_hot=True, SOURCE_URL=input_data.SOURCE_FASHION)
 
-def make_model(modt, D_L):
+def make_model(modt, start_rate, sigma, D_L):
     if modt=='set':
         actvn_fn = tf.identity
-        sigma = 60
+        #sigma = 60, start_rate = 0.001
         model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma)
-        optimizer = SetOptimizer(model, .001, D_L)
+        optimizer = SetOptimizer(model, start_rate, D_L)
         return model, optimizer
 
     if modt=='tree':
         actvn_fn = tf.identity
-        sigma = 60
+        #sigma = 60, start_rate = 0.0001
         model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma)
-        optimizer = TreeOptimizer(model, .0001, D_L)
+        optimizer = TreeOptimizer(model, start_rate, D_L)
         return model, optimizer
 
     if modt=='baseline':
