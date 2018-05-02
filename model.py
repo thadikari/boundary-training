@@ -1,8 +1,6 @@
 import tensorflow as tf
 import numpy as np
-import math
-import os
-import csv
+
 
 def bi(inits, size):
     return tf.Variable(inits * tf.ones([size]), name='b')
@@ -92,6 +90,9 @@ class BoundaryModel:
             smax = tf.nn.softmax(-dists2/sigma)
             self.R_hat_T = tf.matmul(smax, self.R_B)
             
+    def eval_trans(self, sess, X):
+        return sess.run(self.T, {self.X_L:X})
+        
         
 class RateUpdater:
     def __init__(self, start_rate, rate_var):
@@ -118,85 +119,97 @@ def error_calc(real_labels, pred_logits):
     not_eql = tf.not_equal(tf.argmax(real_labels,axis=1), tf.argmax(pred_logits,axis=1))
     return 100.*tf.reduce_mean(tf.cast(not_eql, 'float'))
 
-    
-class SetOptimizer:
-    def __init__(self, model, D_L):
-        
-        self.D_L = D_L
-        self.logger = logging.getLogger('BoundaryOptimizer')
-        self.bset = None
-        self.model = model
-        smr_tr, smr_ts = [], []
+def calc_BT_err(btree, T, R):
+    err = 0.
+    for tt, rr in zip(T, R):
+        err += (np.argmax(btree.infer_probs(tt, 1)) != np.argmax(rr))
+    test_error = 100.*err/T.shape[0]
+    return test_error
 
-        with my_name_scope('classifier/R_hat_T'):
+    
+class BoundaryOptimizer:
+    def __init__(self, model, starting_lr, D_L):
+        self.model = model
+        self.D_L = D_L
+        self.logger = logging.getLogger('Optimizer')
+        self.smr_tr, self.smr_ts = [], []
+        
+        with my_name_scope('classifier'):
             cor = tf.clip_by_value(model.R_hat_T,1e-8,1.0) # self.R_hat_T + 1e-8 #
             ttf = model.R_L * tf.log(cor)
             loss_label = -tf.reduce_mean(ttf)
-            smr_scl('loss', loss_label, smr_tr)
+            smr_scl('loss', loss_label, self.smr_tr)
 
-            with my_name_scope('error'):
-                err = error_calc(model.R_L, model.R_hat_T)
-                smr_scl('train', err, smr_tr)
-                smr_scl('test', err, smr_ts)
-                
-                self.test_error_big = tf.placeholder(tf.float32)
-                smr_scl('test_big', self.test_error_big, smr_ts)
+        self.init()
+        
+        with my_name_scope('error'):
+            self.test_error_final_BT = tf.placeholder(tf.float32)
+            smr_scl('test_final_BT', self.test_error_final_BT, self.smr_ts)
 
-        with my_name_scope('boundary_set'):
-            self.setsize_small = tf.shape(model.X_B)[0]
-            smr_scl('size_small', self.setsize_small, smr_tr)
-            
-            self.setsize_big = tf.placeholder(tf.float32)
-            smr_scl('size_big', self.setsize_big, smr_ts)
-            
+        with my_name_scope('boundary_size'):
+            self.size_final_BT = tf.placeholder(tf.float32)
+            smr_scl('final_BT', self.size_final_BT, self.smr_ts)
+
         with my_name_scope('training'):
             self.sub_list = []
-            s_rate = .001
-            learning_rate = tf.Variable(s_rate, trainable=False, name='learning_rate')
-            smr_scl('learning_rate', learning_rate, smr_ts)
-            self.sub_list.append(RateUpdater(s_rate, learning_rate))
+            learning_rate = tf.Variable(starting_lr, trainable=False, name='learning_rate')
+            smr_scl('learning_rate', learning_rate, self.smr_ts)
+            self.sub_list.append(RateUpdater(starting_lr, learning_rate))
             self.opt = tf.train.AdamOptimizer(learning_rate, beta1=.5).minimize(loss=loss_label, var_list=model.theta_T)
             
-        self.summary_train_op = tf.summary.merge(smr_tr)
-        self.summary_test_op = tf.summary.merge(smr_ts)
+        self.summary_train_op = tf.summary.merge(self.smr_tr)
+        self.summary_test_op = tf.summary.merge(self.smr_ts)
         
     def on_new_epoch(self, sess, last_epoch, num_epochs):
         for it in self.sub_list:
             it.on_new_epoch(sess, last_epoch, num_epochs)
+
+    def build_final_BT(self, sess):
+        D_L = self.D_L
+        perm = np.arange(D_L._num_examples)
+        np.random.shuffle(perm)
+        X_L, R_L = D_L.images[perm], D_L.labels[perm]
+        T_L = self.model.eval_trans(sess, X_L)
+        return build_boundary_tree(T_L, R_L, X_L)
+
+    def eval_final_BT(self, sess, T, R):
+        final_BT = self.build_final_BT(sess)
+        test_error_final_BT = calc_BT_err(final_BT, T, R)
+        return test_error_final_BT, final_BT.size
+
+
+class SetOptimizer(BoundaryOptimizer):
+    def init(self):
+        self.bset = None
+        model, smr_tr, smr_ts = self.model, self.smr_tr, self.smr_ts
+        
+        with my_name_scope('error'):
+            err = error_calc(model.R_L, model.R_hat_T)
+            smr_scl('train', err, smr_tr)
+            smr_scl('test_mini_batch', err, smr_ts)
+            
+        with my_name_scope('boundary_size'):
+            self.size_training = tf.shape(model.X_B)[0]
+            smr_scl('training', self.size_training, smr_tr)
             
     def on_test(self, sess, add_summary, i, X, R):
         
-        if np.random.uniform()>.2:return
+        if np.random.uniform()>.2:return # since final BT build/test are costly
         
         model = self.model
-        X_L, X_B, R_L, R_B = X, self.bset[0], R, self.bset[1]        
-        
-        T = sess.run(model.T, {model.X_L:X})
-        def get_err(btree):
-            err = 0.
-            for tt, rr in zip(T, R):
-                err += (np.argmax(btree.infer_probs(tt, 1)) != np.argmax(rr))
-            test_error = 100.*err/X.shape[0]
-            return test_error
-        
-        perm = np.arange(self.D_L._num_examples)
-        np.random.shuffle(perm)
-        X_L, R_L = self.D_L.images[perm], self.D_L.labels[perm]
-        T_L = sess.run(model.T, {model.X_L:X_L})
-        btree_big = build_boundary_tree(T_L, R_L, X_L)
-        
-        test_error_big = get_err(btree_big)
-        feed_dict = {model.X_L:X_L, model.X_B:X_B, model.R_L:R_L, model.R_B:R_B, self.test_error_big:test_error_big, self.setsize_big:btree_big.size}
+        T = self.model.eval_trans(sess, X)
+        test_error_final_BT, size_final_BT = self.eval_final_BT(sess, T, R)
+        X_L, X_B, R_L, R_B = X, self.bset[0], R, self.bset[1]
+        feed_dict = {model.X_L:X_L, model.X_B:X_B, model.R_L:R_L, model.R_B:R_B, self.test_error_final_BT:test_error_final_BT, self.size_final_BT:size_final_BT}
         summary = sess.run(self.summary_test_op, feed_dict=feed_dict)
-        add_summary(summary, i)
         
-        self.logger.info(str(['test_error_big: ', test_error_big, 'setsize_big', btree_big.size]))
-    
+        self.logger.info(str({'test_error_final_BT':test_error_final_BT, 'size_final_BT':size_final_BT}))
+        add_summary(summary, i)
     
     def on_train(self, sess, add_summary, i, X, R):
         model = self.model
         if self.bset is None or i%2==0:
-            T = sess.run(model.T, {model.X_L:X})
+            T = model.eval_trans(sess, X)
             bset, pts = build_boundary_set_ex(T, R)
             self.bset = (X[pts], R[pts])
         else:
@@ -204,83 +217,31 @@ class SetOptimizer:
             feed_dict = {model.X_L:X_L, model.X_B:X_B, model.R_L:R_L, model.R_B:R_B}
             sess.run(self.opt, feed_dict=feed_dict)
         
-            if i%50:
-                add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
+            if i%50: add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
 
 
-class TreeOptimizer:
-    def __init__(self, model, D_L):
-        self.logger = logging.getLogger('optimizer')
-        self.D_L = D_L
+class TreeOptimizer(BoundaryOptimizer):
+    def init(self):
         self.btree = None
-        self.model = model
-        smr_tr, smr_ts = [], []
-        smr_scl = lambda name,opr,stp: stp.append(tf.summary.scalar(name,opr))
-        smr_hst = lambda name,opr,stp: None#stp.append(tf.summary.histogram(name,opr))
-        
-        def error_calc(real_labels, pred_logits):
-            not_eql = tf.not_equal(tf.argmax(real_labels,axis=1), tf.argmax(pred_logits,axis=1))
-            return 100.*tf.reduce_mean(tf.cast(not_eql, 'float'))
+        model, smr_tr, smr_ts = self.model, self.smr_tr, self.smr_ts
+    
+        with my_name_scope('error'):
+            self.test_error_MB = tf.placeholder(tf.float32)
+            smr_scl('test_mini_batch', self.test_error_MB, smr_ts)
 
-        with my_name_scope('classifier/R_hat_T'):
-            cor = tf.clip_by_value(model.R_hat_T,1e-8,1.0) # self.R_hat_T + 1e-8 #
-            ttf = model.R_L * tf.log(cor)
-            loss_label = -tf.reduce_mean(ttf)
-            smr_scl('loss', loss_label, smr_tr)
+        with my_name_scope('boundary_size'):
+            self.size_training = tf.placeholder(tf.float32)
+            smr_scl('training', self.size_training, smr_tr)
 
-            with my_name_scope('error'):
-                err = error_calc(model.R_L, model.R_hat_T)
-                #smr_scl('train', err, smr_tr)
-
-                self.test_error_small = tf.placeholder(tf.float32)
-                smr_scl('test', self.test_error_small, smr_ts)
-
-                self.test_error_big = tf.placeholder(tf.float32)
-                smr_scl('test_big', self.test_error_big, smr_ts)
-
-        with my_name_scope('boundary_tree'):
-            self.tree_size_small = tf.placeholder(tf.float32)
-            smr_scl('train_size_small', self.tree_size_small, smr_tr)
-
-            self.tree_size_big = tf.placeholder(tf.float32)
-            smr_scl('test_size_big', self.tree_size_big, smr_ts)
-            
-        with my_name_scope('training'):
-            self.sub_list = []
-            s_rate = .0001
-            learning_rate = tf.Variable(s_rate, trainable=False, name='learning_rate')
-            smr_scl('learning_rate', learning_rate, smr_ts)
-            self.sub_list.append(RateUpdater(s_rate, learning_rate))
-            self.opt = tf.train.AdamOptimizer(learning_rate, beta1=.5).minimize(loss=loss_label, var_list=model.theta_T)
-            
-        self.summary_train_op = tf.summary.merge(smr_tr)
-        self.summary_test_op = tf.summary.merge(smr_ts)
-        
-    def on_new_epoch(self, sess, last_epoch, num_epochs):
-        for it in self.sub_list:
-            it.on_new_epoch(sess, last_epoch, num_epochs)
-            
     def on_test(self, sess, add_summary, i, X, R):
         model = self.model
-        T = sess.run(model.T, {model.X_L:X})
-        def get_err(btree):
-            err = 0.
-            for tt, rr in zip(T, R):
-                err += (np.argmax(btree.infer_probs(tt, 1)) != np.argmax(rr))
-            test_error = 100.*err/X.shape[0]
-            return test_error
+        T = self.model.eval_trans(sess, X)
+        test_error_final_BT, size_final_BT = self.eval_final_BT(sess, T, R)
+        test_error_MB = calc_BT_err(self.btree, T, R)
+        summary = sess.run(self.summary_test_op, feed_dict={self.test_error_MB:test_error_MB, self.test_error_final_BT:test_error_final_BT, self.size_final_BT:size_final_BT, self.size_training:self.btree.size})
         
-        perm = np.arange(self.D_L._num_examples)
-        np.random.shuffle(perm)
-        X_L, R_L = self.D_L.images[perm], self.D_L.labels[perm]
-        T_L = sess.run(model.T, {model.X_L:X_L})
-        btree_big = build_boundary_tree(T_L, R_L, X_L)
-        
-        test_error_small = get_err(self.btree)
-        test_error_big = get_err(btree_big)
-        summary = sess.run(self.summary_test_op, feed_dict={self.test_error_small:test_error_small, self.test_error_big:test_error_big, self.tree_size_big:btree_big.size, self.tree_size_small:self.btree.size})
+        self.logger.info(str({'test_error_MB':test_error_MB, 'test_error_final_BT':test_error_final_BT, 'size_training':self.btree.size, 'size_final_BT':size_final_BT}))
         add_summary(summary, i)
-        self.logger.info(str(['test_error_small: ', test_error_small, 'test_error_big', test_error_big, 'tree_size_small', self.btree.size, 'tree_size_big', btree_big.size]))
     
     def on_train(self, sess, add_summary, i, X, R):
         model = self.model
@@ -291,17 +252,15 @@ class TreeOptimizer:
             for ind in range(X.shape[0]):
                 X_L, R_L = X[[ind],:], R[[ind],:]
                 X_B, R_B = self.btree.query_neighbors(T[ind])
-                feed_dict = {model.X_L:X_L, model.X_B:X_B, model.R_L:R_L, model.R_B:R_B, self.tree_size_small:self.btree.size}
+                feed_dict = {model.X_L:X_L, model.X_B:X_B, model.R_L:R_L, model.R_B:R_B, self.size_training:self.btree.size}
                 sess.run(self.opt, feed_dict=feed_dict)
             
-            if i%50:
-                add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
+            if i%50: add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
 
                 
 class BaselineModel:
     def __init__(self, dim_x, dim_r, dim_t, layers):
-    
-        #self.dim_x = dim_x
+
         self.X = tf.placeholder_with_default(tf.zeros([0,dim_x], tf.float32), shape=(None, dim_x), name='X')
         self.R = tf.placeholder_with_default(tf.zeros([0,dim_r], tf.float32), shape=(None, dim_r), name='R')
         
@@ -343,8 +302,7 @@ class BaselineOptimizer:
             
     def on_test(self, sess, add_summary, i, X, R):
         model = self.model
-        feed_dict = {model.X:X, model.R:R}
-        summary = sess.run(self.summary_test_op, feed_dict=feed_dict)
+        summary = sess.run(self.summary_test_op, feed_dict={model.X:X, model.R:R})
         add_summary(summary, i)
     
     def on_train(self, sess, add_summary, i, X, R):
@@ -352,12 +310,10 @@ class BaselineOptimizer:
         feed_dict = {model.X:X, model.R:R}
         sess.run(self.opt, feed_dict=feed_dict)
     
-        if i%500:
-            add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
+        if i%500: add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
 
         
 import time, os, random, scipy
-#import matplotlib.pyplot as plt
 
 
 class ImageMan:
@@ -510,6 +466,32 @@ class SessMan:
         if self.real_run:
             self.saver.save(self.sess, os.path.join(self.cache_dir, 'model.ckpt'), epoch)
 
+            
+from tqdm import tqdm
+
+class Trainer:
+    def __init__(self, dataset):
+        self.ds = dataset
+        
+    def train(self, sman, modules, num_epochs, batch_size):
+        sess = sman.sess
+        last_epoch = sman.last_epoch
+        
+        iters_per_epoch = int(self.ds.train.unlabeled_ds.num_examples/batch_size)
+        iter_start, iter_end = iters_per_epoch*last_epoch, iters_per_epoch*num_epochs
+        
+        for i in tqdm(range(iter_start, iter_end)):
+            for module in modules:
+                module.on_train(sess, sman.add_summary, i, *self.ds.train.labeled_ds.next_batch(batch_size))
+
+            if i % iters_per_epoch == 0:
+                last_epoch = int(i/iters_per_epoch)
+                sman.save(last_epoch)
+                for module in modules:
+                    module.on_test(sess, sman.add_summary, i, self.ds.test.images, self.ds.test.labels)
+                for module in modules:
+                    module.on_new_epoch(sess, last_epoch, num_epochs)
+        
         
 def reset_all(seed=0):
     np.random.seed(seed)
@@ -518,27 +500,26 @@ def reset_all(seed=0):
 
 import input_data
 
-def load_mnist_digits():
-    return input_data.read_mnist('../data/digits', one_hot=True, SOURCE_URL=input_data.SOURCE_DIGITS)
+def load_mnist(dset):
+    if dset=='digits': return input_data.read_mnist('../data/digits', one_hot=True, SOURCE_URL=input_data.SOURCE_DIGITS)
+    if dset=='fashion': return input_data.read_mnist('../data/fashion', one_hot=True, SOURCE_URL=input_data.SOURCE_FASHION)
 
-def load_mnist_fashion():
-    return input_data.read_mnist('../data/fashion', one_hot=True, SOURCE_URL=input_data.SOURCE_FASHION)
+def make_model(modt, D_L):
+    if modt=='set':
+        actvn_fn = tf.identity
+        sigma = 60
+        model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma)
+        optimizer = SetOptimizer(model, .001, D_L)
+        return model, optimizer
 
-def make_set_model(D_L):
-    actvn_fn = tf.identity
-    sigma = 60
-    model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma)
-    optimizer = SetOptimizer(model, D_L)
-    return model, optimizer
+    if modt=='tree':
+        actvn_fn = tf.identity
+        sigma = 60
+        model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma)
+        optimizer = TreeOptimizer(model, .0001, D_L)
+        return model, optimizer
 
-def make_tree_model(D_L):
-    actvn_fn = tf.identity
-    sigma = 1
-    model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma)
-    optimizer = TreeOptimizer(model, D_L)
-    return model, optimizer
-
-def make_baseline_model():
-    model = BaselineModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400])
-    optimizer = BaselineOptimizer(model)
-    return model, optimizer
+    if modt=='baseline':
+        model = BaselineModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400])
+        optimizer = BaselineOptimizer(model)
+        return model, optimizer
