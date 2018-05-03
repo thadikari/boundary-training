@@ -132,11 +132,13 @@ def calc_BT_err(btree, T, R):
 
     
 class BoundaryOptimizer:
-    def __init__(self, model, start_rate, D_L):
+    def __init__(self, model, start_rate, batch_size_bnd, batch_size_trn, D_L):
         self.model = model
         self.D_L = D_L
         self.logger = logging.getLogger('Optimizer')
         self.smr_tr, self.smr_ts = [], []
+        self.batch_size_bnd = batch_size_bnd
+        self.batch_size_trn = batch_size_trn
         
         with my_name_scope('classifier'):
             cor = tf.clip_by_value(model.R_hat_T,1e-8,1.0) # self.R_hat_T + 1e-8 #
@@ -209,21 +211,28 @@ class SetOptimizer(BoundaryOptimizer):
         
         self.logger.info(str({'test_error_final_BT':test_error_final_BT, 'size_final_BT':size_final_BT}))
         add_summary(summary, i)
-    
-    def on_train(self, sess, add_summary, i, X, R):
-        model = self.model
-        if self.bset is None or i%2==0:
-            T = model.eval_trans(sess, X)
-            bset, pts = build_boundary_set_ex(T, R)
-            self.bset = (X[pts], R[pts])
-        else:
-            X_L, X_B, R_L, R_B = X, self.bset[0], R, self.bset[1]
-            feed_dict = {model.X_L:X_L, model.X_B:X_B, model.R_L:R_L, model.R_B:R_B}
-            sess.run(self.opt, feed_dict=feed_dict)
         
-            if i%50: add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
+    def update_set(self, sess, X, R):
+        model = self.model
+        T = model.eval_trans(sess, X)
+        bset, pts = build_boundary_set_ex(T, R)
+        self.bset = (X[pts], R[pts])
 
+    def train_step(self, sess, add_summary, i, X, R):
+        model = self.model
+        X_L, X_B, R_L, R_B = X, self.bset[0], R, self.bset[1]
+        feed_dict = {model.X_L:X_L, model.X_B:X_B, model.R_L:R_L, model.R_B:R_B}
+        sess.run(self.opt, feed_dict=feed_dict)
+    
+        if i%50: add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
 
+    def on_train(self, sess, add_summary, i, X, R):
+        self.update_set(sess, X[:self.batch_size_bnd], R[:self.batch_size_bnd])
+        tot = self.batch_size_bnd+self.batch_size_trn
+        self.train_step(sess, add_summary, i,
+            X[self.batch_size_bnd:tot], R[self.batch_size_bnd:tot])
+
+        
 class TreeOptimizer(BoundaryOptimizer):
     def init(self):
         self.btree = None
@@ -246,20 +255,28 @@ class TreeOptimizer(BoundaryOptimizer):
         
         self.logger.info(str({'test_error_MB':test_error_MB, 'test_error_final_BT':test_error_final_BT, 'size_training':self.btree.size, 'size_final_BT':size_final_BT}))
         add_summary(summary, i)
+        
+    def update_set(self, sess, T, X, R):
+        self.btree = build_boundary_tree(T, R, X)
+    
+    def train_step(self, sess, add_summary, i, T, X, R):
+        model = self.model
+        for ind in range(X.shape[0]):
+            X_L, R_L = X[[ind],:], R[[ind],:]
+            X_B, R_B = self.btree.query_neighbors(T[ind])
+            feed_dict = {model.X_L:X_L, model.X_B:X_B, model.R_L:R_L, model.R_B:R_B, self.size_training:self.btree.size}
+            sess.run(self.opt, feed_dict=feed_dict)
+        
+        if i%50: add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
     
     def on_train(self, sess, add_summary, i, X, R):
         model = self.model
         T = sess.run(model.T, {model.X_L:X})
-        if self.btree is None or i%2==0:
-            self.btree = build_boundary_tree(T, R, X)
-        else:
-            for ind in range(X.shape[0]):
-                X_L, R_L = X[[ind],:], R[[ind],:]
-                X_B, R_B = self.btree.query_neighbors(T[ind])
-                feed_dict = {model.X_L:X_L, model.X_B:X_B, model.R_L:R_L, model.R_B:R_B, self.size_training:self.btree.size}
-                sess.run(self.opt, feed_dict=feed_dict)
-            
-            if i%50: add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
+        self.update_set(sess, T[:self.batch_size_bnd], X[:self.batch_size_bnd], R[:self.batch_size_bnd])
+        tot = self.batch_size_bnd+self.batch_size_trn
+        self.train_step(sess, add_summary, i,
+            T[self.batch_size_bnd:tot], X[self.batch_size_bnd:tot],
+            R[self.batch_size_bnd:tot])
 
                 
 class BaselineModel:
@@ -508,19 +525,19 @@ def load_mnist(dset):
     if dset=='digits': return input_data.read_mnist('../data/digits', one_hot=True, SOURCE_URL=input_data.SOURCE_DIGITS)
     if dset=='fashion': return input_data.read_mnist('../data/fashion', one_hot=True, SOURCE_URL=input_data.SOURCE_FASHION)
 
-def make_model(modt, start_rate, sigma, D_L):
+def make_model(modt, start_rate, sigma, batch_size_bnd, batch_size_trn, D_L):
     if modt=='set':
         actvn_fn = tf.identity
         #sigma = 60, start_rate = 0.001
         model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma)
-        optimizer = SetOptimizer(model, start_rate, D_L)
+        optimizer = SetOptimizer(model, start_rate, batch_size_bnd, batch_size_trn, D_L)
         return model, optimizer
 
     if modt=='tree':
         actvn_fn = tf.identity
         #sigma = 60, start_rate = 0.0001
         model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma)
-        optimizer = TreeOptimizer(model, start_rate, D_L)
+        optimizer = TreeOptimizer(model, start_rate, batch_size_bnd, batch_size_trn, D_L)
         return model, optimizer
 
     if modt=='baseline':
