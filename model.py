@@ -297,14 +297,14 @@ class BaselineOptimizer:
         self.model = model
         smr_tr, smr_ts = [], []
         
-        with my_name_scope('classifier/R_hat_T'):
+        with my_name_scope('classifier'):
             loss_label = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=model.R, logits=model.R_hat_logits))
             smr_scl('loss', loss_label, smr_tr)
 
-            with my_name_scope('error'):
-                err = error_calc(model.R, model.R_hat)
-                smr_scl('train', err, smr_tr)
-                smr_scl('test', err, smr_ts)
+        with my_name_scope('error'):
+            err = error_calc(model.R, model.R_hat)
+            smr_scl('train', err, smr_tr)
+            smr_scl('test_mini_batch', err, smr_ts)
 
         with my_name_scope('training'):
             self.sub_list = []
