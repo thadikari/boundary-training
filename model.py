@@ -100,7 +100,7 @@ class BoundaryModel:
         
 class RateUpdater:
     def __init__(self, start_rate, rate_var):
-        self.ll = [40, 100, 1000]
+        self.ll = [400, 1000, 3000]
         self.look_for = self.ll.pop(0)
         self.curr_val = start_rate
         self.rate_var = rate_var
@@ -200,7 +200,7 @@ class SetOptimizer(BoundaryOptimizer):
             
     def on_test(self, sess, add_summary, i, X, R):
         
-        if np.random.uniform()>.2:return # since final BT build/test are costly
+        if np.random.uniform()>.1:return # since final BT build/test are costly
         
         model = self.model
         T = self.model.eval_trans(sess, X)
@@ -456,7 +456,7 @@ class SessMan:
                             format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
                             datefmt='%H:%M:%S',
                             level=logging.DEBUG)
-        logging.info('initialized logger to file')
+        logging.info('initialized logger to file, PID:[%s]'%str(os.getpid()))
 
 
     def load(self):
