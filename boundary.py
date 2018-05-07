@@ -3,14 +3,15 @@ from scipy import spatial
 
 
 class Node:
-    def __init__(self, t, l, x):
+    def __init__(self, node_index, t, l, x):
+        self.node_index = node_index
         self.child_nodes = []
         self.T = np.array([t])
         self.L = np.array([l])
         self.X = np.array([x])
 
-    def add(self, t, l, x):
-        self.child_nodes.append(Node(t, l, x))
+    def add(self, node_index, t, l, x):
+        self.child_nodes.append(Node(node_index, t, l, x))
         self.T = np.vstack([self.T, t])
         self.L = np.vstack([self.L, l])
         self.X = np.vstack([self.X, x])
@@ -36,7 +37,7 @@ class Tree:
 
     def train(self, t, l, x):
         if self.root is None:
-            self.root = Node(t, l, x)
+            self.root = Node(0, t, l, x)
             self.size = 1
             return True
         else:
@@ -44,8 +45,8 @@ class Tree:
             if np.argmax(v.label) == np.argmax(l):
                 return False
             else:
+                v.add(self.size, t, l, x)
                 self.size += 1
-                v.add(t, l, x)
                 return True
 
     def query__(self, v, t):
@@ -81,18 +82,28 @@ class Tree:
         p = self.query_parent(t)
         return p.X, p.L
     
+    def query_neighbor_inds(self, t):
+        p = self.query_parent(t)
+        inds = [child.node_index for child in p.child_nodes]
+        inds.append(p.node_index)
+        return np.array(inds)
+
     def infer_probs(self, t, sigma):
         p = self.query_parent(t)
         dists = pdists__(p.T, t).T
         smax = softmax(-dists/sigma)
         return np.matmul(smax, p.L)[0]
     
-
-def build_boundary_tree(data, labels, meta):
+def build_boundary_tree_ex(data, labels, meta):
+    result = []
     b_tree = Tree()
     for t, l, x in zip(data, labels, meta):
-        b_tree.train(t, l, x)
-    return b_tree
+        result.append(b_tree.train(t, l, x))
+    return b_tree, result
+
+    
+def build_boundary_tree(data, labels, meta):
+    return build_boundary_tree_ex(data, labels, meta)[0]
 
 
 class Forest:

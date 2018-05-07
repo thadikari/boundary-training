@@ -88,9 +88,13 @@ class BoundaryModel:
         with my_name_scope('classifier'):
             self.T, self.T_logits, self.theta_T = create_fcnet(self.X, layers+[dim_t], tf.nn.relu, actvn_fn)
             
-        with my_name_scope('projection'):
+        with my_name_scope('selection'):
             T_L, T_B = __L(self.T), __B(self.T)
-            dists2 = pdist2(T_L, T_B)
+            dists2_ = pdist2(T_L, T_B)
+            self.N_S = tf.placeholder_with_default(tf.zeros_like(dists2_), shape=(None, None), name='N_S')
+            dists2 = dists2_ + self.N_S
+
+        with my_name_scope('projection'):
             smax = tf.nn.softmax(-dists2/sigma)
             self.R_hat_T = tf.matmul(smax, self.R_B)
             
@@ -113,7 +117,7 @@ class RateUpdater:
             #print last_epoch, self.rate_var.name, self.curr_val
         
 
-from boundary import build_boundary_set_ex, build_boundary_tree
+from boundary import build_boundary_set_ex, build_boundary_tree_ex, build_boundary_tree
 import logging
 
 smr_scl = lambda name,opr,stp: stp.append(tf.summary.scalar(name,opr))
@@ -200,7 +204,7 @@ class SetOptimizer(BoundaryOptimizer):
             
     def on_test(self, sess, add_summary, i, X, R):
         
-        if np.random.uniform()>.1:return # since final BT build/test are costly
+        if np.random.uniform()>.2:return # since final BT build/test are costly
         
         model = self.model
         T = self.model.eval_trans(sess, X)
@@ -279,6 +283,60 @@ class TreeOptimizer(BoundaryOptimizer):
             R[self.batch_size_bnd:tot])
 
                 
+class TreeBatchOptimizer(BoundaryOptimizer):
+    def init(self):
+        self.btree = None
+        model, smr_tr, smr_ts = self.model, self.smr_tr, self.smr_ts
+    
+        with my_name_scope('error'):
+            self.test_error_MB = tf.placeholder(tf.float32)
+            smr_scl('test_mini_batch', self.test_error_MB, smr_ts)
+
+        with my_name_scope('boundary_size'):
+            self.size_training = tf.placeholder(tf.float32)
+            smr_scl('training', self.size_training, smr_tr)
+
+    def on_test(self, sess, add_summary, i, X, R):
+        
+        if np.random.uniform()>.2:return # since final BT build/test are costly
+        
+        model = self.model
+        T = self.model.eval_trans(sess, X)
+        test_error_final_BT, size_final_BT = self.eval_final_BT(sess, T, R)
+        test_error_MB = calc_BT_err(self.btree, T, R)
+        summary = sess.run(self.summary_test_op, feed_dict={self.test_error_MB:test_error_MB, self.test_error_final_BT:test_error_final_BT, self.size_final_BT:size_final_BT, self.size_training:self.btree.size})
+        
+        self.logger.info(str({'test_error_MB':test_error_MB, 'test_error_final_BT':test_error_final_BT, 'size_training':self.btree.size, 'size_final_BT':size_final_BT}))
+        add_summary(summary, i)
+        
+    def update_set(self, sess, T, X, R):
+        self.btree, result = build_boundary_tree_ex(T, R, X)
+        self.treedata = (X[result], R[result])
+    
+    def train_step(self, sess, add_summary, i, T, X, R):
+        model = self.model
+        tr_size = X.shape[0]
+        N_S = np.zeros([tr_size, self.btree.size]) + 9999999.
+        for ind in range(tr_size):
+            inds = self.btree.query_neighbor_inds(T[ind])
+            N_S[ind, inds] = 0
+        
+        X_B, R_B = self.treedata
+        feed_dict = {model.X_L:X, model.X_B:X_B, model.R_L:R, model.R_B:R_B, self.size_training:self.btree.size, model.N_S:N_S}
+        sess.run(self.opt, feed_dict=feed_dict)
+        
+        if i%50: add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
+    
+    def on_train(self, sess, add_summary, i, X, R):
+        model = self.model
+        T = sess.run(model.T, {model.X_L:X})
+        self.update_set(sess, T[:self.batch_size_bnd], X[:self.batch_size_bnd], R[:self.batch_size_bnd])
+        tot = self.batch_size_bnd+self.batch_size_trn
+        self.train_step(sess, add_summary, i,
+            T[self.batch_size_bnd:tot], X[self.batch_size_bnd:tot],
+            R[self.batch_size_bnd:tot])
+
+                
 class BaselineModel:
     def __init__(self, dim_x, dim_r, dim_t, layers):
 
@@ -292,7 +350,7 @@ class BaselineModel:
             
                 
 class BaselineOptimizer:
-    def __init__(self, model):
+    def __init__(self, model, start_rate):
         
         self.model = model
         smr_tr, smr_ts = [], []
@@ -308,10 +366,9 @@ class BaselineOptimizer:
 
         with my_name_scope('training'):
             self.sub_list = []
-            s_rate = .001
-            learning_rate = tf.Variable(s_rate, trainable=False, name='learning_rate')
+            learning_rate = tf.Variable(start_rate, trainable=False, name='learning_rate')
             smr_scl('learning_rate', learning_rate, smr_ts)
-            self.sub_list.append(RateUpdater(s_rate, learning_rate))
+            self.sub_list.append(RateUpdater(start_rate, learning_rate))
             self.opt = tf.train.AdamOptimizer(learning_rate, beta1=.5).minimize(loss=loss_label, var_list=model.theta_R_hat)
             
         self.summary_train_op = tf.summary.merge(smr_tr)
@@ -540,7 +597,14 @@ def make_model(modt, start_rate, sigma, batch_size_bnd, batch_size_trn, D_L):
         optimizer = TreeOptimizer(model, start_rate, batch_size_bnd, batch_size_trn, D_L)
         return model, optimizer
 
+    if modt=='tree_bch':
+        actvn_fn = tf.identity
+        model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma)
+        #sigma = 60, start_rate = 0.0001
+        optimizer = TreeBatchOptimizer(model, start_rate, batch_size_bnd, batch_size_trn, D_L)
+        return model, optimizer
+
     if modt=='baseline':
         model = BaselineModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400])
-        optimizer = BaselineOptimizer(model)
+        optimizer = BaselineOptimizer(model, start_rate)
         return model, optimizer

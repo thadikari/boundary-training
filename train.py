@@ -10,7 +10,7 @@ num_epochs = 2000
 batch_size_bnd = 100
 batch_size_trn = 100
 dset = 'digits' #digits/fashion
-modt = 'set' #set/tree/baseline
+modt = 'tree_bch' #set/tree/tree_bch/baseline
 start_rate = 0.001
 sigma = 60
 
