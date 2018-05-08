@@ -7,16 +7,25 @@ import urllib
 import numpy
 import numpy as np
 
-SOURCE_URL = 'http://yann.lecun.com/exdb/mnist/'
+import sys
+if (sys.version_info > (3, 0)):
+    from functools import reduce
+    from urllib.request import urlretrieve
+else:
+    from urllib import urlretrieve
 
 
-def maybe_download(filename, work_directory):
+SOURCE_DIGITS = 'http://yann.lecun.com/exdb/mnist/'
+SOURCE_FASHION = 'http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/'
+
+
+def maybe_download(filename, work_directory, SOURCE_URL):
   """Download the data from Yann's website, unless it's already here."""
   if not os.path.exists(work_directory):
     os.mkdir(work_directory)
   filepath = os.path.join(work_directory, filename)
   if not os.path.exists(filepath):
-    filepath, _ = urllib.urlretrieve(SOURCE_URL + filename, filepath)
+    filepath, _ = urlretrieve(SOURCE_URL + filename, filepath)
     statinfo = os.stat(filepath)
     print('Succesfully downloaded', filename, statinfo.st_size, 'bytes.')
   return filepath
@@ -171,7 +180,7 @@ class SemiDataSet(object):
         images = numpy.vstack([labeled_images, unlabeled_images])
         return labeled_images, labels, unlabeled_images
 
-def read_mnist(train_dir, n_labeled=-1, one_hot=False):
+def read_mnist(train_dir, n_labeled=-1, one_hot=False, SOURCE_URL=SOURCE_DIGITS):
   class DataSets(object): pass
   data_sets = DataSets()
 
@@ -181,16 +190,16 @@ def read_mnist(train_dir, n_labeled=-1, one_hot=False):
   TEST_LABELS = 't10k-labels-idx1-ubyte.gz'
   VALIDATION_SIZE = 0
 
-  local_file = maybe_download(TRAIN_IMAGES, train_dir)
+  local_file = maybe_download(TRAIN_IMAGES, train_dir, SOURCE_URL)
   train_images = extract_images(local_file)
 
-  local_file = maybe_download(TRAIN_LABELS, train_dir)
+  local_file = maybe_download(TRAIN_LABELS, train_dir, SOURCE_URL)
   train_labels = extract_labels(local_file)#, one_hot=one_hot)
 
-  local_file = maybe_download(TEST_IMAGES, train_dir)
+  local_file = maybe_download(TEST_IMAGES, train_dir, SOURCE_URL)
   test_images = extract_images(local_file)
 
-  local_file = maybe_download(TEST_LABELS, train_dir)
+  local_file = maybe_download(TEST_LABELS, train_dir, SOURCE_URL)
   test_labels = extract_labels(local_file)#, one_hot=one_hot)
 
   validation_images = train_images[:VALIDATION_SIZE]
