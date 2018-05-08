@@ -1,8 +1,20 @@
 import time, os, random, scipy
 import tensorflow as tf
 import numpy as np
-
+import logging
     
+smr_scl = lambda name,opr,stp: stp.append(tf.summary.scalar(name,opr))
+smr_hst = lambda name,opr,stp: None#stp.append(tf.summary.histogram(name,opr))
+
+def reset_all(seed=0):
+    np.random.seed(seed)
+    tf.reset_default_graph()
+    tf.set_random_seed(seed)
+
+def error_calc(real_labels, pred_logits):
+    not_eql = tf.not_equal(tf.argmax(real_labels,axis=1), tf.argmax(pred_logits,axis=1))
+    return 100.*tf.reduce_mean(tf.cast(not_eql, 'float'))
+
 def pdist2(X, Y=None): # dimensions should be, X: NX x C and Y: NY x C
     # X2 = sum(X.^2,1); U = repmat(X2,N,1) + repmat(X2',1,N) - 2*(X'*X);
     X2 = tf.reduce_sum(tf.square(X),1)
@@ -16,7 +28,6 @@ def pdist2(X, Y=None): # dimensions should be, X: NX x C and Y: NY x C
     return dists2
     #return tf.sqrt(dists2 + 1e-10)
     
-
 class my_name_scope(object):
     def __init__(self, name):
         cur = tf.get_default_graph().get_name_scope()
@@ -42,13 +53,9 @@ class RateUpdater:
             self.look_for = self.ll.pop(0) if self.ll else -1
             #print last_epoch, self.rate_var.name, self.curr_val
 
-smr_scl = lambda name,opr,stp: stp.append(tf.summary.scalar(name,opr))
-smr_hst = lambda name,opr,stp: None#stp.append(tf.summary.histogram(name,opr))
-
 class SessMan:
-    def __init__(self, run_id, new_run, real_run):
+    def __init__(self, run_id, new_run, real_run, cache_root=os.path.join('..', 'cache')):
 
-        cache_root = os.path.join('..', 'cache')
         def mkdir():
             new_dir = os.path.join(cache_root, '%s_%s'%(time_id(),run_id))
             if not os.path.exists(new_dir): os.makedirs(new_dir)
@@ -122,15 +129,11 @@ class SessMan:
             self.saver.save(self.sess, os.path.join(self.cache_dir, 'model.ckpt'), epoch)
 
 
-def reset_all(seed=0):
-    np.random.seed(seed)
-    tf.reset_default_graph()
-    tf.set_random_seed(seed)
-
 import input_data
 
-def load_mnist(dset):
-    if dset=='digits': return input_data.read_mnist('../data/digits', one_hot=True, SOURCE_URL=input_data.SOURCE_DIGITS)
-    if dset=='fashion': return input_data.read_mnist('../data/fashion', one_hot=True, SOURCE_URL=input_data.SOURCE_FASHION)
+def load_mnist(dset, n_labeled=-1, data_root=os.path.join('..', 'data')):
+    data_path = os.path.join(data_root, dset)
+    if dset=='digits': return input_data.read_mnist(data_path, one_hot=True, SOURCE_URL=input_data.SOURCE_DIGITS, n_labeled=n_labeled)
+    if dset=='fashion': return input_data.read_mnist(data_path, one_hot=True, SOURCE_URL=input_data.SOURCE_FASHION, n_labeled=n_labeled)
 
 time_id = lambda: time.strftime("%Y%m%d-%H:%M:%S", time.gmtime(time.mktime(time.gmtime())))

@@ -1,7 +1,6 @@
 import tensorflow as tf
 from tqdm import tqdm
 import numpy as np
-import logging
     
 from boundary import build_boundary_set_ex, build_boundary_tree_ex, build_boundary_tree
 from common import *
@@ -80,10 +79,6 @@ class BoundaryModel:
     def eval_trans(self, sess, X):
         return sess.run(self.T, {self.X_L:X})
                 
-
-def error_calc(real_labels, pred_logits):
-    not_eql = tf.not_equal(tf.argmax(real_labels,axis=1), tf.argmax(pred_logits,axis=1))
-    return 100.*tf.reduce_mean(tf.cast(not_eql, 'float'))
 
 def calc_BT_err(btree, T, R):
     err = 0.
