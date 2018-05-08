@@ -1,4 +1,4 @@
-#!/opt/tensorflow/bin/python
+# following implementation is based on https://github.com/rinuboney/ladder
 
 import tensorflow as tf
 import numpy as np
@@ -10,7 +10,7 @@ from collections import OrderedDict
 import input_data
 from common import *
 
-class Model:
+class Model(object):
     def __init__(self, enc_dec_layers, noise_std):
         L = len(enc_dec_layers) - 1  # number of layers
         dim_X = enc_dec_layers[0]
@@ -24,9 +24,11 @@ class Model:
         join = lambda l, u: tf.concat([l, u], 0)
         #labeled = lambda x: tf.slice(x, [0, 0], [batch_size, -1]) if x is not None else x
         #unlabeled = lambda x: tf.slice(x, [batch_size, 0], [-1, -1]) if x is not None else x
+        
         labeled = lambda x: x[:len_l, :] if x is not None else x
         unlabeled = lambda x: x[len_l:, :] if x is not None else x
         split_lu = lambda x: (labeled(x), unlabeled(x))
+        self.labeled, self.unlabeled, self.split_lu = labeled, unlabeled, split_lu
 
         X = join(self.X_L, self.X_U)
         #inputs = tf.placeholder(tf.float32, shape=(None, enc_dec_layers[0]))
@@ -121,7 +123,8 @@ class Model:
 
                 if l == L:
                     # use softmax activation in output layer
-                    h = tf.nn.softmax(weights['gamma'][l-1] * (z + weights["beta"][l-1]))
+                    #h = tf.nn.softmax(weights['gamma'][l-1] * (z + weights["beta"][l-1]))
+                    h = self.enc_final_lay(weights['gamma'][l-1], z, weights["beta"][l-1])
                 else:
                     # use ReLU activation in hidden layers
                     h = tf.nn.relu(z + weights["beta"][l-1])
@@ -136,8 +139,7 @@ class Model:
         print("=== Clean Encoder ===")
         h_cln, clean = encoder(X, None)  # 0.0 -> do not add noise
 
-        self.h_corr_L = labeled(h_corr)
-        self.h_cln_L = labeled(h_cln)
+        self.calc_preds(h_corr, h_cln)
 
         def g_gauss(z_c, u, size):
             "gaussian denoising function proposed in the original paper"
@@ -178,12 +180,43 @@ class Model:
             # append the cost of this layer to d_cost
             self.d_cost.append((tf.reduce_mean(tf.reduce_sum(tf.square(z_est_bn - z), 1)) / enc_dec_layers[l]))
 
+            
+class BaseModel(Model):
+    def __init__(self, enc_dec_layers, noise_std):
+        self.enc_final_lay = lambda gamma, z, beta: tf.nn.softmax(gamma * (z + beta))
+        super(BaseModel, self).__init__(enc_dec_layers, noise_std)
+    
+    def calc_preds(self, h_corr, h_cln):
+        self.R_corr_L = self.labeled(h_corr)
+        self.R_cln_L = self.labeled(h_cln)
 
-class Optimizer:
+        
+class SetModel(Model):
+    def __init__(self, enc_dec_layers, noise_std, sigma2):
+        self.sigma2 = sigma2
+        self.enc_final_lay = lambda gamma, z, beta: tf.identity(z)
+        super(SetModel, self).__init__(enc_dec_layers, noise_std)
+
+    def prediction(self, h_, labs):
+        dists2 = pdist2(h_, self.labeled(h_))
+        smax = tf.nn.softmax(-dists2/self.sigma2)
+        labs_ = tf.matmul(smax, labs)
+        return labs_
+
+    def calc_preds(self, h_corr, h_cln):
+        R_corr = self.prediction(h_corr, self.R_L)
+        self.R_corr_L, R_corr_U = self.split_lu(R_corr)
+
+        R_cln = self.prediction(h_cln, self.R_L)
+        R_cln_L, self.R_cln_U = self.split_lu(R_cln)
+
+    
+class Optimizer(object):
     def __init__(self, model, denoising_cost, start_rate, decay_after):
 
         self.model = model
         smr_tr, smr_ts = [], []
+        self.smr_tr, self.smr_ts = smr_tr, smr_ts
         self.logger = logging.getLogger('Optimizer')
         self.start_rate, self.decay_after = start_rate, decay_after
 
@@ -192,16 +225,11 @@ class Optimizer:
             u_cost = tf.add_n([c_d*lambda_l for c_d, lambda_l in zip(model.d_cost, denoising_cost[::-1])])
             #u_cost = tf.add_n(model.d_cost)
 
-            cost = -tf.reduce_mean(tf.reduce_sum(model.R_L*tf.log(model.h_corr_L), 1))  # supervised cost
+            cost = -tf.reduce_mean(tf.reduce_sum(model.R_L*tf.log(model.R_corr_L+1e-10), 1))  # supervised cost
             self.loss = cost + u_cost  # total cost
             smr_scl('loss', self.loss, smr_tr)
 
             #pred_cost = -tf.reduce_mean(tf.reduce_sum(outputs*tf.log(y), 1))  # cost used for prediction
-
-        with my_name_scope('error'):
-            err = error_calc(model.R_L, model.h_cln_L)
-            smr_scl('test', err, smr_ts)
-            smr_scl('train', err, smr_tr)
 
         with my_name_scope('training'):
             self.learning_rate = tf.Variable(start_rate, trainable=False, name='learning_rate')
@@ -212,6 +240,8 @@ class Optimizer:
         bn_updates = tf.group(*model.bn_assigns)
         with tf.control_dependencies([train_step]):
             self.train_step = tf.group(bn_updates)
+            
+        self.init()
 
         self.summary_train_op = tf.summary.merge(smr_tr)
         self.summary_test_op = tf.summary.merge(smr_ts)
@@ -222,11 +252,6 @@ class Optimizer:
             ratio = max(0, ratio / (num_epochs - self.decay_after))
             sess.run(self.learning_rate.assign(self.start_rate * ratio))
 
-    def on_test(self, sess, add_summary, i, X_L, R_L, X_T, Y_T):
-        model = self.model
-        feed_dict = {model.X_L: X_T, model.R_L: Y_T, model.X_U: X_T, model.training: False}
-        add_summary(sess.run(self.summary_test_op, feed_dict=feed_dict), i)
-
     def on_train(self, sess, add_summary, i, X_L, R_L, X_U):
         model = self.model
         feed_dict = {model.X_L: X_L, model.R_L: R_L, model.X_U: X_U, model.training: True}
@@ -235,6 +260,32 @@ class Optimizer:
         if i%500: add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
 
 
+class BaseOptimizer(Optimizer):
+    def init(self):
+        with my_name_scope('error'):
+            err = error_calc(self.model.R_L, self.model.R_cln_L)
+            smr_scl('test', err, self.smr_ts)
+            smr_scl('train', err, self.smr_tr)
+            
+    def on_test(self, sess, add_summary, i, X_L, R_L, X_T, R_T):
+        model = self.model
+        feed_dict = {model.X_L: X_T, model.R_L: R_T, model.X_U: X_T, model.training: False}
+        add_summary(sess.run(self.summary_test_op, feed_dict=feed_dict), i)
+    
+    
+class SetOptimizer(Optimizer):
+    def init(self):
+        with my_name_scope('error'):
+            self.test_err = tf.placeholder(tf.float32)
+            smr_scl('test', self.test_err, self.smr_ts)
+            
+    def on_test(self, sess, add_summary, i, X_L, R_L, X_T, R_T):
+        feed_dict = {model.X_L: X_L, model.R_L: R_L, model.X_U: X_T, model.training: False}
+        loss, R_cln_U__, learning_rate = sess.run([self.loss, model.R_cln_U, self.learning_rate], feed_dict=feed_dict)
+        errr = 100*np.average(np.argmax(R_cln_U__,1) != np.argmax(R_T,1))
+        add_summary(sess.run(self.summary_test_op, feed_dict={self.test_err:errr}), i)
+        
+    
 class Trainer:
     def __init__(self, dataset):
         self.ds = dataset
@@ -260,14 +311,21 @@ reset_all()
 real_run = 1
 new_run = 1
 dset = 'digits' #digits/fashion
-modt = 'baseline' #set/baseline
+modt = 'set' #set/base
 n_labeled = 1000
+batch_size = 1000
 
-run_id = '%s_%s_%dn_labeled'%(dset, modt, n_labeled)
-model = Model(enc_dec_layers=[784, 1000, 500, 250, 250, 250, 10], noise_std=.3)
-optimizer = Optimizer(model, denoising_cost=[1000.0, 10.0, 0.10, 0.10, 0.10, 0.10, 0.10], start_rate=.02, decay_after=15)
+if modt=='base':
+    model = BaseModel(enc_dec_layers=[784, 1000, 500, 250, 250, 250, 10], noise_std=.3)
+    optimizer = BaseOptimizer(model, denoising_cost=[1000.0, 10.0, 0.10, 0.10, 0.10, 0.10, 0.10], start_rate=.02, decay_after=15)
+    
+if modt=='set':
+    model = SetModel(enc_dec_layers=[784, 1000, 500, 250, 250, 250, 20], noise_std=.3, sigma2=1)
+    optimizer = SetOptimizer(model, denoising_cost=[1000.0, 10.0, 0.10, 0.10, 0.10, 0.10, 0.10], start_rate=.02, decay_after=15)
+    
+run_id = '%s_%s_%dn_labeled_%dbatch_size'%(dset, modt, n_labeled, batch_size)
 sman = SessMan(run_id=run_id, new_run=new_run, real_run=real_run, cache_root=os.path.join('..', 'cache_ladder'))
 trainer = Trainer(load_mnist(dset, n_labeled=n_labeled))
 
 sman.load()
-trainer.train(sman=sman, optimizer=optimizer, num_epochs=1000, batch_size=100)
+trainer.train(sman=sman, optimizer=optimizer, num_epochs=1000, batch_size=batch_size)
