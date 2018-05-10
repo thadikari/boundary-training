@@ -17,7 +17,7 @@ class Model(object):
         num_classes = 10
 
         self.X_L = tf.placeholder(tf.float32, shape=(None, dim_X))
-        self.X_U = tf.placeholder(tf.float32, shape=(None, dim_X))
+        self.X_U = tf.placeholder_with_default(tf.zeros([0, dim_X], tf.float32), shape=(None, dim_X))
         self.R_L = tf.placeholder(tf.float32, shape=(None,num_classes))
 
         len_l, len_u = tf.shape(self.X_L)[0], tf.shape(self.X_U)[0]
@@ -134,12 +134,10 @@ class Model(object):
             return h, d
 
         print("=== Corrupted Encoder ===")
-        h_corr, corr = encoder(X, noise_std)
+        self.h_corr, corr = encoder(X, noise_std)
 
         print("=== Clean Encoder ===")
-        h_cln, clean = encoder(X, None)  # 0.0 -> do not add noise
-
-        self.calc_preds(h_corr, h_cln)
+        self.h_cln, clean = encoder(X, None)  # 0.0 -> do not add noise
 
         def g_gauss(z_c, u, size):
             "gaussian denoising function proposed in the original paper"
@@ -171,7 +169,7 @@ class Model(object):
             z, z_c = clean['unlabeled']['z'][l], corr['unlabeled']['z'][l]
             m, v = clean['unlabeled']['m'].get(l, 0), clean['unlabeled']['v'].get(l, 1-1e-10)
             if l == L:
-                u = unlabeled(h_corr)
+                u = unlabeled(self.h_corr)
             else:
                 u = tf.matmul(z_est[l+1], weights['V'][l])
             u = batch_normalization(u)
@@ -179,23 +177,35 @@ class Model(object):
             z_est_bn = (z_est[l] - m) / v
             # append the cost of this layer to d_cost
             self.d_cost.append((tf.reduce_mean(tf.reduce_sum(tf.square(z_est_bn - z), 1)) / enc_dec_layers[l]))
-
             
+    def eval_trans(self, sess, X):
+        return sess.run(self.h_cln, {self.X_L:X, self.training: False})
+
+        
 class BaseModel(Model):
     def __init__(self, enc_dec_layers, noise_std):
         self.enc_final_lay = lambda gamma, z, beta: tf.nn.softmax(gamma * (z + beta))
+        
         super(BaseModel, self).__init__(enc_dec_layers, noise_std)
     
-    def calc_preds(self, h_corr, h_cln):
-        self.R_corr_L = self.labeled(h_corr)
-        self.R_cln_L = self.labeled(h_cln)
+    # def calc_preds(self):
+        self.R_corr_L = self.labeled(self.h_corr)
+        self.R_cln_L = self.labeled(self.h_cln)
 
         
 class SetModel(Model):
     def __init__(self, enc_dec_layers, noise_std, sigma2):
         self.sigma2 = sigma2
         self.enc_final_lay = lambda gamma, z, beta: tf.identity(z)
+        
         super(SetModel, self).__init__(enc_dec_layers, noise_std)
+
+    # def calc_preds(self):
+        R_corr = self.prediction(self.h_corr, self.R_L)
+        self.R_corr_L, R_corr_U = self.split_lu(R_corr)
+
+        R_cln = self.prediction(self.h_cln, self.R_L)
+        R_cln_L, self.R_cln_U = self.split_lu(R_cln)
 
     def prediction(self, h_, labs):
         dists2 = pdist2(h_, self.labeled(h_))
@@ -203,12 +213,29 @@ class SetModel(Model):
         labs_ = tf.matmul(smax, labs)
         return labs_
 
-    def calc_preds(self, h_corr, h_cln):
-        R_corr = self.prediction(h_corr, self.R_L)
-        self.R_corr_L, R_corr_U = self.split_lu(R_corr)
+        
+class BndrModel(Model):
+    def __init__(self, enc_dec_layers, noise_std, sigma2):
+        self.sigma2 = sigma2
+        self.n_bnd = tf.placeholder(tf.int32)
+        self.enc_final_lay = lambda gamma, z, beta: tf.identity(z)
+        
+        super(BndrModel, self).__init__(enc_dec_layers, noise_std)
 
-        R_cln = self.prediction(h_cln, self.R_L)
-        R_cln_L, self.R_cln_U = self.split_lu(R_cln)
+    #def calc_preds(self):
+        self.R_corr_L2 = self.prediction(self.h_corr, self.R_L)
+        self.R_cln_L2 = self.prediction(self.h_cln, self.R_L)
+        #self.R_corr_L2 = self.labeled(R_corr)
+
+        #R_cln = self.prediction(self.h_cln, self.R_L)
+        #R_cln_L, self.R_cln_U = self.split_lu(R_cln)
+
+    def prediction(self, h_, labs):
+        h_L = self.labeled(h_)
+        dists2 = pdist2(h_L[self.n_bnd:], h_L[:self.n_bnd])
+        smax = tf.nn.softmax(-dists2/self.sigma2)
+        labs_ = tf.matmul(smax, labs[:self.n_bnd])
+        return labs_
 
     
 class Optimizer(object):
@@ -225,7 +252,7 @@ class Optimizer(object):
             u_cost = tf.add_n([c_d*lambda_l for c_d, lambda_l in zip(model.d_cost, denoising_cost[::-1])])
             #u_cost = tf.add_n(model.d_cost)
 
-            cost = -tf.reduce_mean(tf.reduce_sum(model.R_L*tf.log(model.R_corr_L+1e-10), 1))  # supervised cost
+            cost = self.compute_supervised_cost()
             self.loss = cost + u_cost  # total cost
             smr_scl('loss', self.loss, smr_tr)
 
@@ -256,7 +283,6 @@ class Optimizer(object):
         model = self.model
         feed_dict = {model.X_L: X_L, model.R_L: R_L, model.X_U: X_U, model.training: True}
         sess.run(self.train_step, feed_dict=feed_dict)
-
         if i%500: add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
 
 
@@ -266,6 +292,9 @@ class BaseOptimizer(Optimizer):
             err = error_calc(self.model.R_L, self.model.R_cln_L)
             smr_scl('test', err, self.smr_ts)
             smr_scl('train', err, self.smr_tr)
+            
+    def compute_supervised_cost(self):
+        return -tf.reduce_mean(tf.reduce_sum(model.R_L*tf.log(model.R_corr_L+1e-10), 1))  # supervised cost
             
     def on_test(self, sess, add_summary, i, X_L, R_L, X_T, R_T):
         model = self.model
@@ -279,12 +308,57 @@ class SetOptimizer(Optimizer):
             self.test_err = tf.placeholder(tf.float32)
             smr_scl('test', self.test_err, self.smr_ts)
             
+    def compute_supervised_cost(self):
+        return -tf.reduce_mean(tf.reduce_sum(model.R_L*tf.log(model.R_corr_L+1e-10), 1))  # supervised cost
+            
     def on_test(self, sess, add_summary, i, X_L, R_L, X_T, R_T):
         feed_dict = {model.X_L: X_L, model.R_L: R_L, model.X_U: X_T, model.training: False}
         loss, R_cln_U__, learning_rate = sess.run([self.loss, model.R_cln_U, self.learning_rate], feed_dict=feed_dict)
         errr = 100*np.average(np.argmax(R_cln_U__,1) != np.argmax(R_T,1))
         add_summary(sess.run(self.summary_test_op, feed_dict={self.test_err:errr}), i)
         
+
+from boundary import build_boundary_set_ex
+
+class BndrOptimizer(Optimizer):
+    def init(self):
+        smr_scl('n_bnd', self.model.n_bnd, self.smr_tr)
+        with my_name_scope('error'):
+            self.test_err = tf.placeholder(tf.float32)
+            smr_scl('test', self.test_err, self.smr_ts)
+
+    def compute_supervised_cost(self):
+        return -tf.reduce_mean(tf.reduce_sum(model.R_L[self.model.n_bnd:]*tf.log(model.R_corr_L2+1e-10), 1))  # supervised cost
+                        
+    def on_test(self, sess, add_summary, i, X_L, R_L, X_T, R_T):
+        X = np.vstack((X_L, X_T))
+        #R = np.vstack((R_L, R_T))
+        feed_dict = {model.X_L: X, model.R_L: R_L, model.n_bnd:X_L.shape[0], model.training: False}
+        R_cln_L2__, learning_rate = sess.run([model.R_cln_L2, self.learning_rate], feed_dict=feed_dict)
+        errr = 100*np.average(np.argmax(R_cln_L2__,1) != np.argmax(R_T,1))
+        add_summary(sess.run(self.summary_test_op, feed_dict={self.test_err:errr}), i)
+
+    def update_set(self, sess, X, R):
+        model = self.model
+        perm = np.arange(X.shape[0])
+        np.random.shuffle(perm)
+        X, R = X[perm], R[perm]
+
+        T = model.eval_trans(sess, X)
+        _, pts = build_boundary_set_ex(T, R)
+        pts = np.array(pts)
+        X = np.vstack((X[pts], X[~pts]))
+        R = np.vstack((R[pts], R[~pts]))
+        
+        return X, R, np.sum(pts)
+
+    def on_train(self, sess, add_summary, i, X_L, R_L, X_U):
+        X_L, R_L, n_bnd = self.update_set(sess, X_L, R_L)
+        feed_dict = {model.X_L: X_L, model.R_L: R_L, model.n_bnd:n_bnd, model.X_U: X_U, model.training: True}
+        sess.run(self.train_step, feed_dict=feed_dict)
+
+        if i%500: add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
+
     
 class Trainer:
     def __init__(self, dataset):
@@ -308,10 +382,10 @@ class Trainer:
 
 
 reset_all()
-real_run = 1
+real_run = 0
 new_run = 1
 dset = 'digits' #digits/fashion
-modt = 'set' #set/base
+modt = 'bndr' #base/set/bndr
 n_labeled = 1000
 batch_size = 1000
 
@@ -322,6 +396,10 @@ if modt=='base':
 if modt=='set':
     model = SetModel(enc_dec_layers=[784, 1000, 500, 250, 250, 250, 20], noise_std=.3, sigma2=1)
     optimizer = SetOptimizer(model, denoising_cost=[1000.0, 10.0, 0.10, 0.10, 0.10, 0.10, 0.10], start_rate=.02, decay_after=15)
+    
+if modt=='bndr':
+    model = BndrModel(enc_dec_layers=[784, 1000, 500, 250, 250, 250, 20], noise_std=.3, sigma2=1)
+    optimizer = BndrOptimizer(model, denoising_cost=[1000.0, 10.0, 0.10, 0.10, 0.10, 0.10, 0.10], start_rate=.02, decay_after=15)
     
 run_id = '%s_%s_%dn_labeled_%dbatch_size'%(dset, modt, n_labeled, batch_size)
 sman = SessMan(run_id=run_id, new_run=new_run, real_run=real_run, cache_root=os.path.join('..', 'cache_ladder'))
