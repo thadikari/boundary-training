@@ -48,7 +48,7 @@ def create_fcnet(acts_p, layers, inner_actvn_fn, last_actvn_fn):
 
 
 class BoundaryModel:
-    def __init__(self, dim_x, dim_r, dim_t, layers, actvn_fn, sigma):
+    def __init__(self, dim_x, dim_r, dim_t, layers, actvn_fn, sigma, stop_grad):
     
         self.dim_x = dim_x
         self.X_L = tf.placeholder_with_default(tf.zeros([0,dim_x], tf.float32), shape=(None, dim_x), name='X_L')
@@ -68,7 +68,8 @@ class BoundaryModel:
             
         with my_name_scope('selection'):
             T_L, T_B = __L(self.T), __B(self.T)
-            dists2_ = pdist2(T_L, T_B)
+            T_B__ = tf.stop_gradient(T_B) if stop_grad else T_B
+            dists2_ = pdist2(T_L, T_B__)
             self.N_S = tf.placeholder_with_default(tf.zeros_like(dists2_), shape=(None, None), name='N_S')
             dists2 = dists2_ + self.N_S
 
@@ -439,24 +440,24 @@ class Trainer:
                     module.on_new_epoch(sess, last_epoch, num_epochs)
         
         
-def make_model(modt, start_rate, sigma, batch_size_bnd, batch_size_trn, D_L):
+def make_model(modt, start_rate, sigma, batch_size_bnd, batch_size_trn, stop_grad, D_L):
     if modt=='set':
         actvn_fn = tf.identity
         #sigma = 60, start_rate = 0.001
-        model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma)
+        model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma, stop_grad=stop_grad)
         optimizer = SetOptimizer(model, start_rate, batch_size_bnd, batch_size_trn, D_L)
         return model, optimizer
 
     if modt=='tree':
         actvn_fn = tf.identity
         #sigma = 60, start_rate = 0.0001
-        model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma)
+        model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma, stop_grad=stop_grad)
         optimizer = TreeOptimizer(model, start_rate, batch_size_bnd, batch_size_trn, D_L)
         return model, optimizer
 
     if modt=='tree_bch':
         actvn_fn = tf.identity
-        model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma)
+        model = BoundaryModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400], actvn_fn=actvn_fn, sigma=sigma, stop_grad=stop_grad)
         #sigma = 60, start_rate = 0.0001
         optimizer = TreeBatchOptimizer(model, start_rate, batch_size_bnd, batch_size_trn, D_L)
         return model, optimizer

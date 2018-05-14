@@ -12,11 +12,12 @@ batch_size_trn = 100
 dset = 'digits' #digits/fashion
 modt = 'tree_bch' #set/tree/tree_bch/baseline
 start_rate = 0.001
+stop_grad = 0
 sigma = 60
 
-run_id = '%s_%s_%dmbnd_%dmbtr_%srate_%dsigma'%(dset, modt, batch_size_bnd, batch_size_trn, format_e(start_rate), sigma)
+run_id = '%s_%s_%dmbnd_%dmbtr_%srate_%dsigma_%dstop_grad'%(dset, modt, batch_size_bnd, batch_size_trn, format_e(start_rate), sigma, stop_grad)
 trainer = Trainer(load_mnist(dset))
-model, optimizer = make_model(modt, start_rate, sigma, batch_size_bnd, batch_size_trn, trainer.ds.train.labeled_ds)
+model, optimizer = make_model(modt, start_rate, sigma, batch_size_bnd, batch_size_trn, stop_grad, trainer.ds.train.labeled_ds)
 sman = SessMan(run_id=run_id, new_run=new_run, real_run=real_run)
 #imageman = ImageMan(sman, model, trainer.ds.test)
 sman.load()
