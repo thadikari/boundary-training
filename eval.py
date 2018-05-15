@@ -76,7 +76,7 @@ def fn_time():
 def eval_dset(X_L, cache_dir):
     ckpt = tf.train.get_checkpoint_state(cache_dir)
     assert(ckpt)
-    print ckpt.model_checkpoint_path
+    print 'model_checkpoint: ', ckpt.model_checkpoint_path
     
     reset_all()
     sess = tf.Session()
@@ -91,12 +91,14 @@ def eval_dset(X_L, cache_dir):
     return trans
 
 
-def fn_trans():
-    #run_id = '20180504-03:36:26_digits_set_1000mbnd_1000mbtr_1E-03rate_60sigma'
-    #run_id = '20180504-03:34:02_fashion_set_100mbnd_100mbtr_1E-03rate_60sigma'
-    run_id = '20180512-16:13:04_digits_set_100mbnd_100mbtr_1E-03rate_60sigma_0stop_grad_2d'
-    #run_id = '20180514-08:42:14_fashion_set_100mbnd_100mbtr_1E-03rate_60sigma_0stop_grad_2d'
+#run_id = '20180504-03:36:26_digits_set_1000mbnd_1000mbtr_1E-03rate_60sigma'
+run_id = '20180504-03:34:02_fashion_set_100mbnd_100mbtr_1E-03rate_60sigma'
+#run_id = '20180512-16:13:04_digits_set_100mbnd_100mbtr_1E-03rate_60sigma_0stop_grad_2d'
+#run_id = '20180514-08:42:14_fashion_set_100mbnd_100mbtr_1E-03rate_60sigma_0stop_grad_2d'
 
+dset = 'fashion' if 'fashion' in run_id else ('digits' if 'digits' in run_id else None)
+
+def fn_trans():
     cache_dir = os.path.join(cache_root, run_id)
     cache_file = os.path.join(cache_dir, 'tsne_trans')
     if 0:#os.path.exists(cache_file):
@@ -105,8 +107,7 @@ def fn_trans():
     else:
         print 'no cache found'
         
-        D_T = load_mnist('digits').train.labeled_ds #digits/fashion
-        
+        D_T = load_mnist(dset).test #digits/fashion
         T = eval_dset(D_T.images, cache_dir)
         labels = np.argmax(D_T.labels, 1)
 
@@ -134,12 +135,7 @@ def fn_trans():
 
 
 def fn_gray():
-    #run_id = '20180504-03:36:26_digits_set_1000mbnd_1000mbtr_1E-03rate_60sigma'
-    #run_id = '20180504-03:34:02_fashion_set_100mbnd_100mbtr_1E-03rate_60sigma'
-    run_id = '20180512-16:13:04_digits_set_100mbnd_100mbtr_1E-03rate_60sigma_0stop_grad_2d'
-    #run_id = '20180514-08:42:14_fashion_set_100mbnd_100mbtr_1E-03rate_60sigma_0stop_grad_2d'
-    D_T = load_mnist('digits').train.labeled_ds #digits/fashion test#
-
+    D_T = load_mnist(dset).train.labeled_ds #digits/fashion test#
     cache_dir = os.path.join(cache_root, run_id)
     T = eval_dset(D_T.images, cache_dir)
     
