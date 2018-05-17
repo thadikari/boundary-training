@@ -96,7 +96,15 @@ run_id = '20180504-03:34:02_fashion_set_100mbnd_100mbtr_1E-03rate_60sigma'
 #run_id = '20180512-16:13:04_digits_set_100mbnd_100mbtr_1E-03rate_60sigma_0stop_grad_2d'
 #run_id = '20180514-08:42:14_fashion_set_100mbnd_100mbtr_1E-03rate_60sigma_0stop_grad_2d'
 
-dset = 'fashion' if 'fashion' in run_id else ('digits' if 'digits' in run_id else None)
+if 'fashion' in run_id:
+    dset = 'fashion'
+    fontdict = {'fontsize':10, 'weight':"bold"}
+    defs = defs_f = {0: 'T-shirt/top', 1: 'Trouser', 2: 'Pullover', 3: 'Dress', 4: 'Coat', 5: 'Sandal', 6: 'Shirt', 7: 'Sneaker', 8: 'Bag', 9: 'Ankle boot'}
+else if 'digits' in run_id:
+    dset = 'digits'
+    defs_d = dict([(i, str(i)) for i in range(10)])
+    fontdict = {'fontsize':20, 'weight':"bold"}
+
 
 def fn_trans():
     cache_dir = os.path.join(cache_root, run_id)
@@ -107,7 +115,7 @@ def fn_trans():
     else:
         print 'no cache found'
         
-        D_T = load_mnist(dset).test #digits/fashion
+        D_T = load_mnist(dset, n_labeled=10000).train.labeled_ds #digits/fashion
         T = eval_dset(D_T.images, cache_dir)
         labels = np.argmax(D_T.labels, 1)
 
@@ -125,7 +133,7 @@ def fn_trans():
     for i in range(max(labels)+1):
         indices = labels == i
         center = np.average(trans[indices], 0)
-        plt.text(center[0], center[1], str(i), fontsize=20, weight="bold")
+        plt.text(center[0], center[1], defs[i], fontdict=fontdict)
 
     plt.xticks([])
     plt.yticks([])
