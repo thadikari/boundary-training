@@ -7,6 +7,7 @@ smr_scl = lambda name,opr,stp: stp.append(tf.summary.scalar(name,opr))
 smr_hst = lambda name,opr,stp: None#stp.append(tf.summary.histogram(name,opr))
 
 def reset_all(seed=0):
+    random.seed(seed)
     np.random.seed(seed)
     tf.reset_default_graph()
     tf.set_random_seed(seed)
@@ -40,8 +41,8 @@ class my_name_scope(object):
     
         
 class RateUpdater:
-    def __init__(self, start_rate, rate_var):
-        self.ll = [400, 1000, 3000]
+    def __init__(self, start_rate, rate_var, chkpts):
+        self.ll = chkpts
         self.look_for = self.ll.pop(0)
         self.curr_val = start_rate
         self.rate_var = rate_var
