@@ -194,6 +194,50 @@ from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from matplotlib import gridspec
 import scipy.misc
 
+def fn_ladder():
+    cache_root = os.path.join('..', 'cache_ladder')
+    run_id = '20180606-00:59:18_digits_set_1000n_labeled_1000batch_size_2dim_t'
+    run_id = '20180606-01:13:41_digits_bndr_1000n_labeled_1000batch_size_2dim_t'
+    reset_all(599544)
+
+    if 'fashion' in run_id:
+        dset = 'fashion'
+        fontdict = {'fontsize':6, 'weight':'bold'}
+        defs = {0: 'T-shirt/top', 1: 'Trouser', 2: 'Pullover', 3: 'Dress', 4: 'Coat', 5: 'Sandal', 6: 'Shirt', 7: 'Sneaker', 8: 'Bag', 9: 'Ankle boot'}
+    elif 'digits' in run_id:
+        dset = 'digits'
+        defs = dict([(i, str(i)) for i in range(10)])
+        fontdict = {'fontsize':12, 'weight':'bold'}
+
+    cache_dir = os.path.join(cache_root, run_id)
+    mnist = load_mnist(dset, n_labeled=10000)
+    DS = mnist.test#train.labeled_ds
+    X, R = permute([DS.images, DS.labels])
+
+    sess = eval_dset__(cache_dir)
+    T, Y = eval_dset_ex({'X_L':X}, ['T_L'], sess)[0], np.argmax(R, 1)
+    assert(T.shape[1]==2)
+
+    print 'plotting!'
+    ax1 = plt.gca()
+
+    #background scatter
+    cmap = plt.get_cmap('tab10')
+    ax1.scatter(T[:, 0], T[:, 1], marker='o', s=5, edgecolor='none', c=Y, cmap=cmap)
+
+    #cluster center label
+    for i in range(10):
+        indices = Y == i
+        center = np.average(T[indices], 0)
+        ax1.text(center[0], center[1], defs[i], fontdict=fontdict)
+
+    ax1.set_aspect('equal', adjustable='box')
+    hide_axticks(ax1)
+    plt.savefig(os.path.join(cache_root, '%s.pdf'%run_id), bbox_inches='tight')
+    plt.show()
+    print('saved plot.')
+
+
 def fn_movie(run_id):
     reset_all(599544)
     dset, fontdict, defs = get_default_defs(run_id)
@@ -208,7 +252,6 @@ def fn_movie(run_id):
         fontdict = {'fontsize':10, 'weight':'bold'}
 
     cache_dir = os.path.join(cache_root, run_id)
-    cache_file = os.path.join(cache_dir, 'tsne_trans')
     mnist = load_mnist(dset, n_labeled=10000)
     DS = mnist.train.labeled_ds
     X, R = permute([DS.images, DS.labels])
@@ -304,3 +347,4 @@ if __name__ == '__main__':
     if sys.argv[1]=='trans': fn_trans(run_id)
     if sys.argv[1]=='gray': fn_gray(run_id)
     if sys.argv[1]=='movie': fn_movies()
+    if sys.argv[1]=='ladder': fn_ladder()

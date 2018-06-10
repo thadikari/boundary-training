@@ -16,9 +16,11 @@ class Model(object):
         dim_X = enc_dec_layers[0]
         num_classes = 10
 
-        self.X_L = tf.placeholder(tf.float32, shape=(None, dim_X))
-        self.X_U = tf.placeholder_with_default(tf.zeros([0, dim_X], tf.float32), shape=(None, dim_X))
-        self.R_L = tf.placeholder(tf.float32, shape=(None,num_classes))
+        #self.X_L = tf.placeholder(tf.float32, shape=(None, dim_X), name='X_L')
+        self.X_L = tf.placeholder_with_default(tf.zeros([0,dim_X], tf.float32), shape=(None, dim_X), name='X_L')
+        self.X_U = tf.placeholder_with_default(tf.zeros([0, dim_X], tf.float32), shape=(None, dim_X), name='X_U')
+        self.R_L = tf.placeholder_with_default(tf.zeros([0,num_classes], tf.float32), shape=(None, num_classes), name='R_L')
+        #self.R_L = tf.placeholder(tf.float32, shape=(None,num_classes), name='R_L')
 
         len_l, len_u = tf.shape(self.X_L)[0], tf.shape(self.X_U)[0]
         join = lambda l, u: tf.concat([l, u], 0)
@@ -49,7 +51,7 @@ class Model(object):
                    # batch normalization parameter to scale the normalized value
                    'gamma': [bi(1.0, enc_dec_layers[l+1], "beta") for l in range(L)]}
 
-        self.training = tf.placeholder(tf.bool)
+        self.training = tf.placeholder_with_default(False, shape=[])
 
         ewma = tf.train.ExponentialMovingAverage(decay=0.99)  # to calculate the moving averages of mean and variance
         self.bn_assigns = []  # this list stores the updates to be made to average mean and variance
@@ -138,6 +140,7 @@ class Model(object):
 
         print("=== Clean Encoder ===")
         self.h_cln, clean = encoder(X, None)  # 0.0 -> do not add noise
+        self.T_L = tf.identity(self.labeled(self.h_cln), name='T_L')
 
         def g_gauss(z_c, u, size):
             "gaussian denoising function proposed in the original paper"
@@ -382,26 +385,27 @@ class Trainer:
 
 
 reset_all()
-real_run = 0
+real_run = 1
 new_run = 1
 dset = 'digits' #digits/fashion
 modt = 'bndr' #base/set/bndr
 n_labeled = 1000
 batch_size = 1000
+dim_t = 2
 
 if modt=='base':
-    model = BaseModel(enc_dec_layers=[784, 1000, 500, 250, 250, 250, 10], noise_std=.3)
+    model = BaseModel(enc_dec_layers=[784, 1000, 500, 250, 250, 250, dim_t, 10], noise_std=.3)
     optimizer = BaseOptimizer(model, denoising_cost=[1000.0, 10.0, 0.10, 0.10, 0.10, 0.10, 0.10], start_rate=.02, decay_after=15)
     
 if modt=='set':
-    model = SetModel(enc_dec_layers=[784, 1000, 500, 250, 250, 250, 20], noise_std=.3, sigma2=1)
+    model = SetModel(enc_dec_layers=[784, 1000, 500, 250, 250, 250, dim_t], noise_std=.3, sigma2=1)
     optimizer = SetOptimizer(model, denoising_cost=[1000.0, 10.0, 0.10, 0.10, 0.10, 0.10, 0.10], start_rate=.02, decay_after=15)
     
 if modt=='bndr':
-    model = BndrModel(enc_dec_layers=[784, 1000, 500, 250, 250, 250, 20], noise_std=.3, sigma2=1)
+    model = BndrModel(enc_dec_layers=[784, 1000, 500, 250, 250, 250, dim_t], noise_std=.3, sigma2=1)
     optimizer = BndrOptimizer(model, denoising_cost=[1000.0, 10.0, 0.10, 0.10, 0.10, 0.10, 0.10], start_rate=.02, decay_after=15)
     
-run_id = '%s_%s_%dn_labeled_%dbatch_size'%(dset, modt, n_labeled, batch_size)
+run_id = '%s_%s_%dn_labeled_%dbatch_size_%ddim_t'%(dset, modt, n_labeled, batch_size, dim_t)
 sman = SessMan(run_id=run_id, new_run=new_run, real_run=real_run, cache_root=os.path.join('..', 'cache_ladder'))
 trainer = Trainer(load_mnist(dset, n_labeled=n_labeled))
 
