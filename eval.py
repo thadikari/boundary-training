@@ -242,6 +242,7 @@ def fn_movie(run_id):
     reset_all(599544)
     dset, fontdict, defs = get_default_defs(run_id)
     
+    baseline = 'baseline' in run_id
     if 'fashion' in run_id:
         dset = 'fashion'
         fontdict = {'fontsize':6, 'weight':'bold'}
@@ -255,12 +256,10 @@ def fn_movie(run_id):
     mnist = load_mnist(dset, n_labeled=10000)
     DS = mnist.train.labeled_ds
     X, R = permute([DS.images, DS.labels])
-
     sess = eval_dset__(cache_dir)
-    T, Y = eval_dset_ex({'X_L':X}, ['T_L'], sess)[0], np.argmax(R, 1)
-    assert(T.shape[1]==2)
         
     if 0:
+        T, Y = eval_dset_ex({'X_L':X}, ['T_L'], sess)[0], np.argmax(R, 1)
         _, pts = build_boundary_set_ex(T, R)
         pts = np.array(pts)
         X_B, R_B = X[pts], R[pts]
@@ -277,10 +276,6 @@ def fn_movie(run_id):
         inds = [it for ii in ll_classes for it in np.random.choice(np.nonzero(np.argmax(rest[1], 1)==ii)[0], from_each).tolist()]
         X_L, R_L = rest[0][inds], rest[1][inds]
         
-    feed_dict = {'X_L':X_L, 'R_L':R_L, 'X_B':X_B, 'R_B':R_B}
-    T_L, T_B = eval_dset_ex(feed_dict, ['T_L', 'T_B'], sess)
-    Y_L, Y_B = np.argmax(R_L, 1), np.argmax(R_B, 1)
-    
     cmap = plt.get_cmap('tab10')
     colors = cmap(np.linspace(0, 1, 10))
    
@@ -289,14 +284,23 @@ def fn_movie(run_id):
     gs = gridspec.GridSpec(1, 2, width_ratios=[3, 2])
     ax1 = plt.subplot(gs[0])
     
+    T_B = eval_dset_ex({('X' if baseline else 'X_B'):X_B}, [('T_logits' if baseline else 'T_B')], sess)[0]
+    Y_L, Y_B = np.argmax(R_L, 1), np.argmax(R_B, 1)
+    
     #background scatter
+    assert(T_B.shape[1]==2)
     ax1.scatter(T_B[:, 0], T_B[:, 1], marker='o', s=5, edgecolor='none', c=Y_B, cmap=cmap)
     
     #generate path
     mossaic_ll = []
     for eps in [it*.01 for it in range(0, 30, 3)]:
-        feed_dict = {'X_L':X_L, 'R_L':R_L, 'X_B':X_B, 'R_B':R_B, 'epsilon':eps}
-        T_L_tilde, R_hat_T_tilde, X_L_tilde = eval_dset_ex(feed_dict, ['T_L_tilde', 'R_hat_T_tilde', 'X_L_tilde'], sess)
+        if baseline:
+            feed_dict = {'X':X_L, 'R':R_L, 'epsilon':eps}
+            out_list = ['T_logits_tilde', 'R_hat_tilde', 'X_tilde']
+        else:
+            feed_dict = {'X_L':X_L, 'R_L':R_L, 'X_B':X_B, 'R_B':R_B, 'epsilon':eps}
+            out_list = ['T_L_tilde', 'R_hat_T_tilde', 'X_L_tilde']
+        T_L_tilde, R_hat_T_tilde, X_L_tilde = eval_dset_ex(feed_dict, out_list, sess)
         #plt.scatter(T_L_tilde[:, 0], T_L_tilde[:, 1], marker='P', s=100, edgecolor='none', c='k')
         mossaic_ll.append(X_L_tilde.reshape([-1, 28, 28]).swapaxes(0,1).reshape(28, -1))
         for coords, preds, label, tilde in zip(T_L_tilde, R_hat_T_tilde, Y_L, X_L_tilde):
@@ -331,14 +335,21 @@ def fn_movie(run_id):
     print('saved plot.')
     
     # calc final test error using all traning data
-    feed_dict = {'X_L':mnist.test.images, 'R_L':mnist.test.labels, 'X_B':mnist.train.labeled_ds.images, 'R_B':mnist.train.labeled_ds.labels, 'epsilon':.25}
-    err, err_tilde = eval_dset_ex(feed_dict, ['err', 'err_tilde'], sess)
-    print({'err':err, 'err_tilde':err_tilde})
+    if not baseline:
+        feed_dict = {'X_L':mnist.test.images, 'R_L':mnist.test.labels, 'X_B':mnist.train.labeled_ds.images, 'R_B':mnist.train.labeled_ds.labels, 'epsilon':.25}
+        err, err_tilde = eval_dset_ex(feed_dict, ['err', 'err_tilde'], sess)
+        print({'err':err, 'err_tilde':err_tilde})
 
 
 def fn_movies():
     run_ll = [os.path.basename(x[0]) for x in os.walk(cache_root)]
-    return ([fn_movie(run_id) for run_id in run_ll if (('2dim_t' in run_id) and ('adv_train' in run_id) and ('_baseline_' not in run_id))])
+    #return fn_movie('20180613-21:46:54_digits_baseline_100mbnd_100mbtr_2dim_t_1E-03rate_1E-03regularizer_0.25epsilon_val_60sigma_0adv_train_1stop_grad')
+    #return ([fn_movie(run_id) for run_id in run_ll if (('2dim_t' in run_id) and ('adv_train' in run_id) and ('_baseline_' not in run_id))])
+    for run_id in [run_id for run_id in run_ll if '2dim_t' in run_id]:
+        try:
+            fn_movie(run_id)
+        except:
+            print('failed for [%s]'%run_id)
         
 if __name__ == '__main__':
     

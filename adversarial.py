@@ -167,21 +167,23 @@ class BaselineModel:
         
         def classifier(X, R):
             with my_name_scope('classifier'):
-                R_hat, R_hat_logits, theta_R_hat = create_fcnet(X, layers+[dim_t, dim_r], tf.nn.relu, tf.nn.softmax)
+                T, T_logits, theta_T = create_fcnet(X, layers+[dim_t], tf.nn.relu, tf.nn.relu)
+                R_hat, R_hat_logits, theta_R_hat = create_layer(T, dim_r, tf.nn.softmax)
                 # print theta_R_hat
                 loss_label = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=R, logits=R_hat_logits))
                 err = error_calc(R, R_hat)
                 # smr_scl('loss', loss_label, smr_tr)
-                return R_hat, loss_label, err
+                return R_hat, loss_label, err, T_logits
                 
-        R_hat, loss_label, self.err = classifier(self.X, self.R)
+        R_hat, loss_label, self.err, T_logits = classifier(self.X, self.R)
         grads_wrt_input = tf.gradients(loss_label, self.X)[0]
         peturb = self.epsilon*tf.sign(grads_wrt_input)
         X_tilde = tf.clip_by_value(self.X + peturb, 0., 1.)
         X_tilde = tf.stop_gradient(X_tilde) if stop_grad else X_tilde
-        R_hat_tilde, loss_label_tilde, self.err_tilde = classifier(X_tilde, self.R)
+        R_hat_tilde, loss_label_tilde, self.err_tilde, T_logits_tilde = classifier(X_tilde, self.R)
         
         self.im_X, self.im_peturb, self.im_X_tilde = self.X, peturb, X_tilde
+        X_tilde, R_hat_tilde, T_logits, T_logits_tilde = tf.identity(X_tilde, name='X_tilde'), tf.identity(R_hat_tilde, name='R_hat_tilde'), tf.identity(T_logits, name='T_logits'), tf.identity(T_logits_tilde, name='T_logits_tilde')
         
         W2_ll = [tf.reduce_mean(tf.square(vv)) for vv in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES) if 'var_W' in vv.name]
         loss_total = loss_label + (loss_label_tilde if adv_train else 0.) + regularizer*tf.add_n(W2_ll)
