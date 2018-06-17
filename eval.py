@@ -341,21 +341,24 @@ def fn_movie(run_id):
         print({'err':err, 'err_tilde':err_tilde})
 
 
-def fn_movies():
+def fn_movies(run_id):
     run_ll = [os.path.basename(x[0]) for x in os.walk(cache_root)]
-    #return fn_movie('20180613-21:46:54_digits_baseline_100mbnd_100mbtr_2dim_t_1E-03rate_1E-03regularizer_0.25epsilon_val_60sigma_0adv_train_1stop_grad')
     #return ([fn_movie(run_id) for run_id in run_ll if (('2dim_t' in run_id) and ('adv_train' in run_id) and ('_baseline_' not in run_id))])
-    for run_id in [run_id for run_id in run_ll if '2dim_t' in run_id]:
-        try:
-            fn_movie(run_id)
-        except:
-            print('failed for [%s]'%run_id)
+    if run_id:
+        return fn_movie(run_id)
+    else:
+        for run_id in [run_id for run_id in run_ll if '2dim_t' in run_id]:
+            try:
+                fn_movie(run_id)
+            except:
+                print('failed for [%s]'%run_id)
         
 if __name__ == '__main__':
     
     reset_all(599)
+    run_id = sys.argv[2] if len(sys.argv)>2 else None
     if sys.argv[1]=='time': fn_time(run_id)
     if sys.argv[1]=='trans': fn_trans(run_id)
     if sys.argv[1]=='gray': fn_gray(run_id)
-    if sys.argv[1]=='movie': fn_movies()
-    if sys.argv[1]=='ladder': fn_ladder()
+    if sys.argv[1]=='movie': fn_movies(run_id)
+    if sys.argv[1]=='ladder': fn_ladder(run_id)
