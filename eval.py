@@ -286,9 +286,28 @@ def fn_movie(run_id):
     
     T_B = eval_dset_ex({('X' if baseline else 'X_B'):X_B}, [('T_logits' if baseline else 'T_B')], sess)[0]
     Y_L, Y_B = np.argmax(R_L, 1), np.argmax(R_B, 1)
-    
-    #background scatter
     assert(T_B.shape[1]==2)
+    
+    if 1 and not baseline:
+        mx, mn = T_B.max(0), T_B.min(0)
+        span = mx - mn
+        padding = span*.1
+        mx, mn = mx+padding, mn-padding
+        
+        resln = 1
+        xv = np.linspace(mn[0], mx[0], int(resln*(mx[0]-mn[0])))
+        yv = np.linspace(mn[1], mx[1], int(resln*(mx[1]-mn[1])))
+        x, y = np.meshgrid(xv, yv)
+        grd = np.array([x.flatten(), y.flatten()]).T
+
+        feed_dict = {'T_L':grd, 'T_B':T_B, 'R_B':R_B}
+        R_hat_T = eval_dset_ex(feed_dict, ['R_hat_T'], sess)[0]
+
+        ccs = np.clip(np.matmul(R_hat_T, colors), 0., 1.)
+        ax1.scatter(grd[:,0], grd[:,1], marker='o', s=5, c=ccs, alpha=.2, edgecolor='none')
+        #plt.show()
+
+    #background scatter
     ax1.scatter(T_B[:, 0], T_B[:, 1], marker='o', s=5, edgecolor='none', c=Y_B, cmap=cmap)
     
     #generate path
