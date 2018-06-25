@@ -141,11 +141,18 @@ class BoundaryModel:
         
         loss_total = loss_label + adv_loss + regularizer*weight_loss
             
+        grads_wrt_input2 = tf.gradients(loss_label + adv_loss, self.X_L)[0]
+        peturb2 = self.epsilon*tf.sign(grads_wrt_input2)
+        X_L_tilde2 = tf.clip_by_value(self.X_L + peturb2, 0., 1., name='X_L_tilde2')
+        R_hat_T_tilde2, loss_label_tilde2, self.err_tilde2, bsize_tilde2, T_L_tilde2, T_B_tilde2 = classifier(X_L_tilde2, self.R_L, self.X_B, self.R_B, '_tilde2')
+
         # optimizing related code
         smr_tr, smr_ts = [], []
         with my_name_scope('testing'):
             smr_scl('error', self.err, smr_ts)
-            if not self.siamese: smr_scl('error_tilde', self.err_tilde, smr_ts)
+            if not self.siamese:
+                smr_scl('error_tilde', self.err_tilde, smr_ts)
+                smr_scl('error_tilde2', self.err_tilde2, smr_ts)
             smr_scl('bsize', bsize_tilde, smr_ts)
 
         with my_name_scope('training'):
@@ -357,7 +364,7 @@ siamese = 1
 dim_t = 20
 sigma = 60
 
-run_id = '%s_%s_%dmbnd_%dmbtr_%ddim_t_%srate_%sregularizer_%sepsilon_val_%dsigma_%dadv_train_%dstop_grad_%dsiamese_loggg'%(dset, modt, batch_size_bnd, batch_size_trn, dim_t, format_e(start_rate), format_e(regularizer), str(epsilon_val), sigma, adv_train, stop_grad, siamese)
+run_id = '%s_%s_%dmbnd_%dmbtr_%ddim_t_%srate_%sregularizer_%sepsilon_val_%dsigma_%dadv_train_%dstop_grad_%dsiamese'%(dset, modt, batch_size_bnd, batch_size_trn, dim_t, format_e(start_rate), format_e(regularizer), str(epsilon_val), sigma, adv_train, stop_grad, siamese)
 trainer = Trainer(load_mnist(dset))
 model = make_model(modt, dim_t, start_rate, regularizer, epsilon_val, stop_grad, sigma, batch_size_bnd, adv_train, trainer.ds.train.labeled_ds, siamese)
 sman = SessMan(run_id=run_id, new_run=new_run, real_run=real_run)
