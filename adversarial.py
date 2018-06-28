@@ -208,6 +208,10 @@ class BoundaryModel:
         X_L, X_B, R_L, R_B = X, self.bset[0], R, self.bset[1]
         feed_dict = {self.X_L:X_L, self.X_B:X_B, self.R_L:R_L, self.R_B:R_B, self.epsilon:self.epsilon_val}
         add_summary(sess.run(self.summary_test_op, feed_dict=feed_dict), i)
+    
+    def on_image_test(self, sess, add_summary, i, X, R, test_op):
+        if self.siamese: return
+        add_summary(sess.run(test_op, feed_dict={self.X_L: X, self.R_L: R, self.X_B:self.bset[0], self.R_B:self.bset[1], self.epsilon:self.epsilon_val}), i)
         
                 
 class BaselineModel:
@@ -268,7 +272,7 @@ class BaselineModel:
     def on_test(self, sess, add_summary, i, X, R):
         err, err_tilde, summary = sess.run([self.err, self.err_tilde, self.summary_test_op], feed_dict={self.X:X, self.R:R, self.epsilon:self.epsilon_val})
         add_summary(summary, i)
-        print(err, err_tilde)
+        #print(err, err_tilde)
     
     def on_train(self, sess, add_summary, i, X, R):
         feed_dict = {self.X:X, self.R:R, self.epsilon:self.epsilon_val}
@@ -276,6 +280,10 @@ class BaselineModel:
     
         if i%500: add_summary(sess.run(self.summary_train_op, feed_dict=feed_dict), i)
 
+    def on_image_test(self, sess, add_summary, i, X, R, test_op):
+        model = self
+        add_summary(sess.run(test_op, feed_dict={model.X: X, model.R: R, model.epsilon:model.epsilon_val}), i)
+        
 
 class ImageMan:
     def __init__(self, sman, model, D_T):
@@ -305,9 +313,7 @@ class ImageMan:
         self.summary_test_op = tf.summary.merge(summary_test)
             
     def on_test(self, sess, add_summary, i, X, R):
-        model = self.model
-        if model.siamese: return
-        add_summary(sess.run(self.summary_test_op, feed_dict={model.X_L: self.X_J, model.R_L: self.R_J, model.X_B:model.bset[0], model.R_B:model.bset[1], model.epsilon:model.epsilon_val}), i)
+        self.model.on_image_test(sess, add_summary, i, self.X_J, self.R_J, self.summary_test_op)
 
     def on_new_epoch(self, sess, last_epoch, num_epochs): pass
     def on_train(self, sess, add_summary, i, X, R): return
