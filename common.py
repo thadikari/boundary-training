@@ -42,7 +42,7 @@ class my_name_scope(object):
         
 class RateUpdater:
     def __init__(self, start_rate, rate_var, chkpts):
-        self.ll = chkpts
+        self.ll = list(chkpts)
         self.look_for = self.ll.pop(0)
         self.curr_val = start_rate
         self.rate_var = rate_var
