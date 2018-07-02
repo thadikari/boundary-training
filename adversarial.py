@@ -78,9 +78,14 @@ def loss_with_logs(T_1, T_2, R_1, R_2):
     ttf = labels_t * tf.log(tf.clip_by_value(probs,1e-8,1.0)) + labels_f * tf.log(tf.clip_by_value(1-probs,1e-8,1.0))
     return -tf.reduce_mean(ttf)
 
+def gen_adv_ex(loss_term, inp_X, eps, name):
+    grads_wrt_input = tf.gradients(loss_term, inp_X)[0]
+    peturb = eps*tf.sign(grads_wrt_input)
+    return tf.clip_by_value(inp_X + peturb, 0., 1., name=name)
 
+    
 class BoundaryModel:
-    def __init__(self, dim_x, dim_r, dim_t, layers, adv_train, actvn_fn, sigma, start_rate, regularizer, batch_size_bnd, epsilon_val, stop_grad, siamese):
+    def __init__(self, dim_x, dim_r, dim_t, layers, adv_train, actvn_fn, sigma, start_rate, regularizer, batch_size_bnd, epsilon_val, siamese):
     
         self.siamese = siamese
         self.batch_size_bnd = batch_size_bnd
@@ -123,14 +128,10 @@ class BoundaryModel:
             #loss_with_spring
 
         R_hat_T, loss_label, self.err, bsize, T_L, T_B = classifier(self.X_L, self.R_L, self.X_B, self.R_B, '')
-        grads_wrt_input = tf.gradients(loss_label, self.X_L)[0]
-        peturb = self.epsilon*tf.sign(grads_wrt_input)
-        X_L_tilde = tf.clip_by_value(self.X_L + peturb, 0., 1.)
-        X_L_tilde = tf.stop_gradient(X_L_tilde) if stop_grad else X_L_tilde
-        X_L_tilde = tf.identity(X_L_tilde, name='X_L_tilde')
+
+        X_L_tilde = gen_adv_ex(loss_label, self.X_L, self.epsilon, 'X_L_tilde')
         R_hat_T_tilde, loss_label_tilde, self.err_tilde, bsize_tilde, T_L_tilde, T_B_tilde = classifier(X_L_tilde, self.R_L, self.X_B, self.R_B, '_tilde')
-        
-        self.im_X, self.im_peturb, self.im_X_tilde = self.X_L, peturb, X_L_tilde
+        self.im_X, self.im_X_tilde = self.X_L, X_L_tilde
         
         W2_ll = [tf.reduce_mean(tf.square(vv)) for vv in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES) if 'var_W' in vv.name]
         weight_loss = tf.add_n(W2_ll)
@@ -139,13 +140,13 @@ class BoundaryModel:
         elif adv_train==2: adv_loss = tf.reduce_mean(tf.square(tf.stop_gradient(T_L)-T_L_tilde))
         else: adv_loss = 0.
         
-        loss_total = loss_label + adv_loss + regularizer*weight_loss
+        adv_cog_loss = loss_label + adv_loss
+        loss_total = adv_cog_loss + regularizer*weight_loss
             
-        grads_wrt_input2 = tf.gradients(loss_label + adv_loss, self.X_L)[0]
-        peturb2 = self.epsilon*tf.sign(grads_wrt_input2)
-        X_L_tilde2 = tf.clip_by_value(self.X_L + peturb2, 0., 1., name='X_L_tilde2')
+        X_L_tilde2 = gen_adv_ex(adv_cog_loss, self.X_L, self.epsilon, 'X_L_tilde2')
         R_hat_T_tilde2, loss_label_tilde2, self.err_tilde2, bsize_tilde2, T_L_tilde2, T_B_tilde2 = classifier(X_L_tilde2, self.R_L, self.X_B, self.R_B, '_tilde2')
 
+        self.im_X_tilde2 = X_L_tilde2
         # optimizing related code
         smr_tr, smr_ts = [], []
         with my_name_scope('testing'):
@@ -215,7 +216,7 @@ class BoundaryModel:
         
                 
 class BaselineModel:
-    def __init__(self, dim_x, dim_r, dim_t, layers, adv_train, start_rate, regularizer, epsilon_val, stop_grad):
+    def __init__(self, dim_x, dim_r, dim_t, layers, adv_train, start_rate, regularizer, epsilon_val):
         
         self.epsilon_val = epsilon_val
         
@@ -237,22 +238,27 @@ class BaselineModel:
                 return R_hat, loss_label, err, T_logits
                 
         R_hat, loss_label, self.err, T_logits = classifier(self.X, self.R, '')
-        grads_wrt_input = tf.gradients(loss_label, self.X)[0]
-        peturb = self.epsilon*tf.sign(grads_wrt_input)
-        X_tilde = tf.clip_by_value(self.X + peturb, 0., 1.)
-        X_tilde = (tf.stop_gradient if stop_grad else tf.identity)(X_tilde, name='X_tilde')
+        X_tilde = gen_adv_ex(loss_label, self.X, self.epsilon, 'X_tilde')
         R_hat_tilde, loss_label_tilde, self.err_tilde, T_logits_tilde = classifier(X_tilde, self.R, '_tilde')
         
-        self.im_X, self.im_peturb, self.im_X_tilde = self.X, peturb, X_tilde
+        self.im_X, self.im_X_tilde = self.X, X_tilde
         
         W2_ll = [tf.reduce_mean(tf.square(vv)) for vv in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES) if 'var_W' in vv.name]
-        loss_total = loss_label + (loss_label_tilde if adv_train else 0.) + regularizer*tf.add_n(W2_ll)
             
+        adv_loss = loss_label_tilde if adv_train else 0.
+        adv_cog_loss = loss_label + adv_loss
+        loss_total = loss_label + adv_cog_loss + regularizer*tf.add_n(W2_ll)
+            
+        X_tilde2 = gen_adv_ex(adv_cog_loss, self.X, self.epsilon, 'X_tilde2')
+        R_hat_tilde2, loss_label_tilde2, self.err_tilde2, T_logits_tilde2 = classifier(X_tilde2, self.R, '_tilde2')
+        self.im_X_tilde2 = X_tilde2
+
         # optimizing related code
         smr_tr, smr_ts = [], []
         with my_name_scope('testing'):
             smr_scl('error', self.err, smr_ts)
             smr_scl('error_tilde', self.err_tilde, smr_ts)
+            smr_scl('error_tilde2', self.err_tilde2, smr_ts)
 
         with my_name_scope('training'):
             smr_scl('error', self.err, smr_tr)
@@ -300,16 +306,17 @@ class ImageMan:
             return tf.reshape(ims, [1, nrows, ncols, height, width, intensity])
             
         summary_test = []
-        def gen_ims(ims):
-            nrows, ncols, height, width, intensity = (im_count, 3, im_len, im_len, 1)
+        def gen_ims(ims, len_ims):
+            nrows, ncols, height, width, intensity = (im_count, len_ims, im_len, im_len, 1)
             ims = tf.reshape(ims, [1, nrows, ncols, height, width, intensity])
             ims = tf.transpose(ims, (0,1,3,2,4,5))
             ims = tf.reshape(ims, (1, height*nrows, width*ncols, intensity))
             summary_test.append(tf.summary.image('images', ims, max_outputs=20))
 
-        peturb_im = .5 + model.im_peturb/2.
-        ims = tf.concat([resh_(model.im_X), resh_(peturb_im), resh_(model.im_X_tilde)], axis=2)
-        gen_ims(ims)
+        #peturb_im = .5 + model.im_peturb/2.
+        ll_ims = [resh_(model.im_X), resh_(model.im_X_tilde), resh_(model.im_X_tilde2), resh_(tf.abs(model.im_X_tilde-model.im_X_tilde2))]
+        ims = tf.concat(ll_ims, axis=2)
+        gen_ims(ims, len(ll_ims))
         #gen_ims('generated_images', model.X_hat)
         self.summary_test_op = tf.summary.merge(summary_test)
             
@@ -344,13 +351,13 @@ class Trainer:
                     module.on_new_epoch(sess, last_epoch, num_epochs)
         
         
-def make_model(modt, dim_t, start_rate, regularizer, epsilon_val, stop_grad, sigma, batch_size_bnd, adv_train, D_L, siamese):
+def make_model(modt, dim_t, start_rate, regularizer, epsilon_val, sigma, batch_size_bnd, adv_train, D_L, siamese):
     if modt=='set':
         actvn_fn = tf.identity
-        return BoundaryModel(dim_x=784, dim_r=10, dim_t=dim_t, layers=[400,400], adv_train=adv_train, actvn_fn=actvn_fn, sigma=sigma, start_rate=start_rate, regularizer=regularizer, batch_size_bnd=batch_size_bnd, epsilon_val=epsilon_val, stop_grad=stop_grad, siamese=siamese)
+        return BoundaryModel(dim_x=784, dim_r=10, dim_t=dim_t, layers=[400,400], adv_train=adv_train, actvn_fn=actvn_fn, sigma=sigma, start_rate=start_rate, regularizer=regularizer, batch_size_bnd=batch_size_bnd, epsilon_val=epsilon_val, siamese=siamese)
         
     if modt=='baseline':
-        return BaselineModel(dim_x=784, dim_r=10, dim_t=dim_t, layers=[400,400], adv_train=adv_train, start_rate=start_rate, regularizer=regularizer, epsilon_val=epsilon_val, stop_grad=stop_grad)
+        return BaselineModel(dim_x=784, dim_r=10, dim_t=dim_t, layers=[400,400], adv_train=adv_train, start_rate=start_rate, regularizer=regularizer, epsilon_val=epsilon_val)
         
         
 reset_all()
@@ -371,9 +378,9 @@ siamese = 1
 dim_t = 20
 sigma = 60
 
-run_id = '%s_%s_%dmbnd_%dmbtr_%ddim_t_%srate_%sregularizer_%sepsilon_val_%dsigma_%dadv_train_%dstop_grad_%dsiamese'%(dset, modt, batch_size_bnd, batch_size_trn, dim_t, format_e(start_rate), format_e(regularizer), str(epsilon_val), sigma, adv_train, stop_grad, siamese)
+run_id = '%s_%s_%dmbnd_%dmbtr_%ddim_t_%srate_%sregularizer_%sepsilon_val_%dsigma_%dadv_train_%dsiamese_newew_fixed_rerun'%(dset, modt, batch_size_bnd, batch_size_trn, dim_t, format_e(start_rate), format_e(regularizer), str(epsilon_val), sigma, adv_train, siamese)
 trainer = Trainer(load_mnist(dset))
-model = make_model(modt, dim_t, start_rate, regularizer, epsilon_val, stop_grad, sigma, batch_size_bnd, adv_train, trainer.ds.train.labeled_ds, siamese)
+model = make_model(modt, dim_t, start_rate, regularizer, epsilon_val, sigma, batch_size_bnd, adv_train, trainer.ds.train.labeled_ds, siamese)
 sman = SessMan(run_id=run_id, new_run=new_run, real_run=real_run)
 imageman = ImageMan(sman, model, trainer.ds.test)
 sman.load()
