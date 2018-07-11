@@ -217,9 +217,10 @@ class BoundaryModel:
         add_summary(sess.run(test_op, feed_dict={self.X_L: X, self.R_L: R, self.X_B:self.bset[0], self.R_B:self.bset[1], self.epsilon:self.epsilon_val}), i)
         
                 
-class BaselineModel:
+class BaseModel:
     def __init__(self, dim_x, dim_r, dim_t, layers, adv_train, start_rate, regularizer, epsilon_val):
         
+        self.init(dim_r, dim_t, layers)
         self.epsilon_val = epsilon_val
         
         # model related code
@@ -227,21 +228,9 @@ class BaselineModel:
         self.X = tf.placeholder_with_default(tf.zeros([0,dim_x], tf.float32), shape=(None, dim_x), name='X')
         self.R = tf.placeholder_with_default(tf.zeros([0,dim_r], tf.float32), shape=(None, dim_r), name='R')
         
-        def classifier(X, R, suffx):
-            with my_name_scope('classifier'):
-                T, T_logits, theta_T = create_fcnet(X, layers+[dim_t], tf.nn.relu, tf.nn.relu)
-                T_logits = tf.identity(T_logits, name='T_logits'+suffx)
-                R_hat, R_hat_logits, theta_R_hat = create_layer(T, dim_r, tf.nn.softmax)
-                R_hat = tf.identity(R_hat, name='R_hat'+suffx)
-                # print theta_R_hat
-                loss_label = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=R, logits=R_hat_logits))
-                err = error_calc(R, R_hat)
-                # smr_scl('loss', loss_label, smr_tr)
-                return R_hat, loss_label, err, T_logits
-                
-        R_hat, loss_label, self.err, T_logits = classifier(self.X, self.R, '')
+        R_hat, loss_label, self.err, T_logits = self.classifier(self.X, self.R, '')
         X_tilde = gen_adv_ex(loss_label, self.X, self.epsilon, 'X_tilde')
-        R_hat_tilde, loss_label_tilde, self.err_tilde, T_logits_tilde = classifier(X_tilde, self.R, '_tilde')
+        R_hat_tilde, loss_label_tilde, self.err_tilde, T_logits_tilde = self.classifier(X_tilde, self.R, '_tilde')
         
         self.im_X, self.im_X_tilde = self.X, X_tilde
         
@@ -252,7 +241,7 @@ class BaselineModel:
         loss_opt = loss_total + regularizer*tf.add_n(W2_ll)
             
         X_tilde2 = gen_adv_ex(loss_total, self.X, self.epsilon, 'X_tilde2')
-        R_hat_tilde2, loss_label_tilde2, self.err_tilde2, T_logits_tilde2 = classifier(X_tilde2, self.R, '_tilde2')
+        R_hat_tilde2, loss_label_tilde2, self.err_tilde2, T_logits_tilde2 = self.classifier(X_tilde2, self.R, '_tilde2')
         self.im_X_tilde2 = X_tilde2
 
         # optimizing related code
@@ -295,6 +284,43 @@ class BaselineModel:
         model = self
         add_summary(sess.run(test_op, feed_dict={model.X: X, model.R: R, model.epsilon:model.epsilon_val}), i)
         
+
+class BaselineModel(BaseModel):
+    def init(self, dim_r, dim_t, layers):
+        self.dim_r, self.dim_t, self.layers = dim_r, dim_t, layers
+
+    def classifier(self, X, R, suffx):
+        with my_name_scope('classifier'):
+            T, T_logits, theta_T = create_fcnet(X, self.layers+[self.dim_t], tf.nn.relu, tf.nn.relu)
+            T_logits = tf.identity(T_logits, name='T_logits'+suffx)
+            R_hat, R_hat_logits, theta_R_hat = create_layer(T, self.dim_r, tf.nn.softmax)
+            R_hat = tf.identity(R_hat, name='R_hat'+suffx)
+            # print theta_R_hat
+            loss_label = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=R, logits=R_hat_logits))
+            err = error_calc(R, R_hat)
+            # smr_scl('loss', loss_label, smr_tr)
+            return R_hat, loss_label, err, T_logits
+
+
+class FloatModel(BaseModel):
+    def init(self, dim_r, dim_t, layers):
+        self.dim_r, self.dim_t, self.layers = dim_r, dim_t, layers
+        self.targets = tf.Variable(tf.random_normal((dim_r, dim_t)), name='targets')#shape=(dim_r, dim_t)
+
+    def classifier(self, X, R, suffx):
+        with my_name_scope('classifier'):
+            T, T_logits, theta_T = create_fcnet(X, self.layers+[self.dim_t], tf.nn.relu, tf.identity) #??identity
+            T_logits = tf.identity(T_logits, name='T_logits'+suffx)
+
+            dists2 = pdist2(T_logits, self.targets)#?? use pdist???
+            R_hat_logits = -dists2
+            R_hat = tf.nn.softmax(R_hat_logits, name='R_hat'+suffx) #??sigma=1??
+            # print theta_R_hat
+            loss_label = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=R, logits=R_hat_logits))
+            err = error_calc(R, R_hat)
+            # smr_scl('loss', loss_label, smr_tr)
+            return R_hat, loss_label, err, T_logits
+
 
 class ImageMan:
     def __init__(self, sman, model, D_T):
@@ -363,6 +389,9 @@ def make_model(modt, dim_t, start_rate, regularizer, epsilon_val, sigma, batch_s
     if modt=='baseline':
         return BaselineModel(dim_x=784, dim_r=10, dim_t=dim_t, layers=[400,400], adv_train=adv_train, start_rate=start_rate, regularizer=regularizer, epsilon_val=epsilon_val)
         
+    if modt=='float':
+        return FloatModel(dim_x=784, dim_r=10, dim_t=dim_t, layers=[400,400], adv_train=adv_train, start_rate=start_rate, regularizer=regularizer, epsilon_val=epsilon_val)
+
         
 reset_all()
 real_run = 1
@@ -372,7 +401,7 @@ num_epochs = 1000
 batch_size_bnd = 100
 batch_size_trn = 100
 dset = 'digits' #digits/fashion
-modt = 'set' #set/baseline
+modt = 'float' #set/baseline/float
 start_rate = 0.001
 regularizer = 0.001
 epsilon_val = .25
