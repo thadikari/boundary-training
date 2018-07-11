@@ -140,10 +140,10 @@ class BoundaryModel:
         elif adv_train==2: adv_loss = tf.reduce_mean(tf.square(tf.stop_gradient(T_L)-T_L_tilde))
         else: adv_loss = 0.
         
-        adv_cog_loss = loss_label + adv_loss
-        loss_total = adv_cog_loss + regularizer*weight_loss
+        loss_total = loss_label + adv_loss
+        loss_opt = loss_total + regularizer*weight_loss
             
-        X_L_tilde2 = gen_adv_ex(adv_cog_loss, self.X_L, self.epsilon, 'X_L_tilde2')
+        X_L_tilde2 = gen_adv_ex(loss_total, self.X_L, self.epsilon, 'X_L_tilde2')
         R_hat_T_tilde2, loss_label_tilde2, self.err_tilde2, bsize_tilde2, T_L_tilde2, T_B_tilde2 = classifier(X_L_tilde2, self.R_L, self.X_B, self.R_B, '_tilde2')
 
         self.im_X_tilde2 = X_L_tilde2
@@ -155,18 +155,20 @@ class BoundaryModel:
                 smr_scl('error_tilde', self.err_tilde, smr_ts)
                 smr_scl('error_tilde2', self.err_tilde2, smr_ts)
             smr_scl('bsize', bsize_tilde, smr_ts)
+            smr_scl('loss_total', loss_total, smr_ts)
 
         with my_name_scope('training'):
             smr_scl('loss_label', loss_label, smr_tr)
             smr_scl('weight_loss', weight_loss, smr_tr)
             smr_scl('adv_loss', adv_loss, smr_tr)
-            smr_scl('loss', loss_total, smr_tr)
+            smr_scl('loss_total', loss_total, smr_tr)
+            smr_scl('loss', loss_opt, smr_tr)
             smr_scl('error', self.err, smr_tr)
             self.sub_list = []
             learning_rate = tf.Variable(start_rate, trainable=False)
             smr_scl('learning_rate', learning_rate, smr_ts)
             self.sub_list.append(RateUpdater(start_rate, learning_rate, chkpts))
-            self.opt = tf.train.AdamOptimizer(learning_rate).minimize(loss=loss_total)
+            self.opt = tf.train.AdamOptimizer(learning_rate).minimize(loss=loss_opt)
             #self.opt1 = tf.train.AdamOptimizer(learning_rate/10.).minimize(loss=adv_loss)
             
         self.summary_train_op = tf.summary.merge(smr_tr)
@@ -246,10 +248,10 @@ class BaselineModel:
         W2_ll = [tf.reduce_mean(tf.square(vv)) for vv in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES) if 'var_W' in vv.name]
             
         adv_loss = loss_label_tilde if adv_train else 0.
-        adv_cog_loss = loss_label + adv_loss
-        loss_total = loss_label + adv_cog_loss + regularizer*tf.add_n(W2_ll)
+        loss_total = loss_label + adv_loss
+        loss_opt = loss_total + regularizer*tf.add_n(W2_ll)
             
-        X_tilde2 = gen_adv_ex(adv_cog_loss, self.X, self.epsilon, 'X_tilde2')
+        X_tilde2 = gen_adv_ex(loss_total, self.X, self.epsilon, 'X_tilde2')
         R_hat_tilde2, loss_label_tilde2, self.err_tilde2, T_logits_tilde2 = classifier(X_tilde2, self.R, '_tilde2')
         self.im_X_tilde2 = X_tilde2
 
@@ -259,15 +261,17 @@ class BaselineModel:
             smr_scl('error', self.err, smr_ts)
             smr_scl('error_tilde', self.err_tilde, smr_ts)
             smr_scl('error_tilde2', self.err_tilde2, smr_ts)
+            smr_scl('loss_total', loss_total, smr_ts)
 
         with my_name_scope('training'):
             smr_scl('error', self.err, smr_tr)
-            smr_scl('loss', loss_total, smr_tr)
+            smr_scl('loss_total', loss_total, smr_tr)
+            smr_scl('loss', loss_opt, smr_tr)
             self.sub_list = []
             learning_rate = tf.Variable(start_rate, trainable=False)
             smr_scl('learning_rate', learning_rate, smr_ts)
             self.sub_list.append(RateUpdater(start_rate, learning_rate, chkpts))
-            self.opt = tf.train.AdamOptimizer(learning_rate, beta1=.5).minimize(loss=loss_total)
+            self.opt = tf.train.AdamOptimizer(learning_rate, beta1=.5).minimize(loss=loss_opt)
             
         self.summary_train_op = tf.summary.merge(smr_tr)
         self.summary_test_op = tf.summary.merge(smr_ts)
@@ -373,12 +377,11 @@ start_rate = 0.001
 regularizer = 0.001
 epsilon_val = .25
 adv_train = 1 #1=standard FGSM / 2=nearest neigh
-stop_grad = 1
-siamese = 1
+siamese = 0
 dim_t = 20
 sigma = 60
 
-run_id = '%s_%s_%dmbnd_%dmbtr_%ddim_t_%srate_%sregularizer_%sepsilon_val_%dsigma_%dadv_train_%dsiamese_newew_fixed_rerun'%(dset, modt, batch_size_bnd, batch_size_trn, dim_t, format_e(start_rate), format_e(regularizer), str(epsilon_val), sigma, adv_train, siamese)
+run_id = '%s_%s_%dmbnd_%dmbtr_%ddim_t_%srate_%sregularizer_%sepsilon_val_%dsigma_%dadv_train_%dsiamese'%(dset, modt, batch_size_bnd, batch_size_trn, dim_t, format_e(start_rate), format_e(regularizer), str(epsilon_val), sigma, adv_train, siamese)
 trainer = Trainer(load_mnist(dset))
 model = make_model(modt, dim_t, start_rate, regularizer, epsilon_val, sigma, batch_size_bnd, adv_train, trainer.ds.train.labeled_ds, siamese)
 sman = SessMan(run_id=run_id, new_run=new_run, real_run=real_run)
