@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tqdm import tqdm
 import numpy as np
+import sys
     
 from boundary import build_boundary_set_ex
 from common import *
@@ -409,6 +410,25 @@ adv_train = 1 #1=standard FGSM / 2=nearest neigh
 siamese = 0
 dim_t = 20
 sigma = 60
+
+
+if len(sys.argv)>1:  # run array job on niagara
+    id = int(sys.argv[1])
+    choices = [
+               list(reversed([1,2,5,10,20,40,60,70,80,90,100,120,140,160,180,200,220,240,260,300,340,350,380,400])),
+               [1, 0],
+               ['float', 'baseline'],
+              ]
+    choice_dims = [len(it) for it in choices]
+    tot_ids = np.prod(choice_dims)
+    print('For [%d] jobs expecting IDs from [%d] to [%d] inclusive.'%(tot_ids, 0, tot_ids-1))
+    unrvl = np.unravel_index(id, choice_dims)
+    print('Received job ID [%d] unraveled to [%s].'%(id, str(unrvl)))
+    job_spec = [cho[pos] for cho, pos in zip(choices, unrvl)]
+    print('Spec: %s'%(str(job_spec)))
+
+    dim_t, adv_train, modt = job_spec
+
 
 run_id = '%s_%s_%dmbnd_%dmbtr_%ddim_t_%srate_%sregularizer_%sepsilon_val_%dsigma_%dadv_train_%dsiamese'%(dset, modt, batch_size_bnd, batch_size_trn, dim_t, format_e(start_rate), format_e(regularizer), str(epsilon_val), sigma, adv_train, siamese)
 trainer = Trainer(load_mnist(dset))
