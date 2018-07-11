@@ -369,7 +369,7 @@ class Trainer:
         iters_per_epoch = int(self.ds.train.unlabeled_ds.num_examples/batch_size)
         iter_start, iter_end = iters_per_epoch*last_epoch, iters_per_epoch*num_epochs
         
-        for i in tqdm(range(iter_start, iter_end)):
+        for i in pbar(range(iter_start, iter_end)):
             for module in modules:
                 module.on_train(sess, sman.add_summary, i, *self.ds.train.labeled_ds.next_batch(batch_size))
 
@@ -411,7 +411,7 @@ siamese = 0
 dim_t = 20
 sigma = 60
 
-
+pbar = tqdm
 if len(sys.argv)>1:  # run array job on niagara
     id = int(sys.argv[1])
     choices = [
@@ -428,6 +428,7 @@ if len(sys.argv)>1:  # run array job on niagara
     print('Spec: %s'%(str(job_spec)))
 
     dim_t, adv_train, modt = job_spec
+    pbar = tqal
 
 
 run_id = '%s_%s_%dmbnd_%dmbtr_%ddim_t_%srate_%sregularizer_%sepsilon_val_%dsigma_%dadv_train_%dsiamese'%(dset, modt, batch_size_bnd, batch_size_trn, dim_t, format_e(start_rate), format_e(regularizer), str(epsilon_val), sigma, adv_train, siamese)

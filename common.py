@@ -1,4 +1,5 @@
 import time, os, random, scipy
+import datetime
 import tensorflow as tf
 import numpy as np
 import logging
@@ -138,3 +139,46 @@ def load_mnist(dset, n_labeled=-1, data_root=os.path.join('..', 'data')):
     if dset=='fashion': return input_data.read_mnist(data_path, one_hot=True, SOURCE_URL=input_data.SOURCE_FASHION, n_labeled=n_labeled)
 
 time_id = lambda: time.strftime("%Y%m%d-%H:%M:%S", time.gmtime(time.mktime(time.gmtime())))
+secstr = lambda secs: str(datetime.timedelta(seconds=int(secs)))
+
+
+class tqal:
+    def __init__(self, obj):
+        self.freq = 10.
+        self.obj = obj
+        self.total = (obj.shape[0] if hasattr(obj, "shape")
+                    else len(obj) if hasattr(obj, "__len__")
+                    else getattr(self, "total", None))
+
+    def __iter__(self):
+        self.iterable = self.obj.__iter__()
+        self.started = time.time()
+        self.last_prntd = 0
+        self.count = 0
+        return self
+
+    def prline(self, tt):
+        st = datetime.datetime.fromtimestamp(tt).strftime('%H:%M:%S')
+        elapsd = tt - self.started
+        elapsdstr = secstr(elapsd)
+        if self.total is not None:
+          assert(self.count<=self.total)
+          perc = 100.*self.count/self.total
+          if self.count>0:
+            expectstr = secstr(elapsd*(self.total/self.count-1))
+          else:
+            expectstr = '-:--:--'
+          print('%s| %d%% : %d/%d [%s < %s]'%(st, int(perc), self.count, self.total, elapsdstr, expectstr))
+        else:
+          print('%s| %d [%s]'%(st, self.count, elapsdstr))
+
+    def get_next(self, itrnxt):
+        tt = time.time()
+        if self.count==0 or (tt - self.last_prntd) > self.freq or self.count==self.total:
+            self.prline(tt)
+            self.last_prntd = tt
+        self.count += 1
+        return itrnxt()
+
+    def next(self): return self.get_next(self.iterable.next)
+    def __next__(self): return self.get_next(self.iterable.__next__)
