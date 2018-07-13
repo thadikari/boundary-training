@@ -293,7 +293,7 @@ class BaselineModel(BaseModel):
             R_hat, R_hat_logits, theta_R_hat = create_layer(T, self.dim_r, tf.nn.softmax)
             R_hat = tf.identity(R_hat, name='R_hat'+suffx)
             # print theta_R_hat
-            loss_label = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=R, logits=R_hat_logits))
+            loss_label = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=R, logits=R_hat_logits))
             err = error_calc(R, R_hat)
             # smr_scl('loss', loss_label, smr_tr)
             return R_hat, loss_label, err, T_logits
@@ -313,7 +313,7 @@ class FloatModel(BaseModel):
             R_hat_logits = -dists2
             R_hat = tf.nn.softmax(R_hat_logits, name='R_hat'+suffx) #??sigma=1??
             # print theta_R_hat
-            loss_label = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=R, logits=R_hat_logits))
+            loss_label = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=R, logits=R_hat_logits))
             err = error_calc(R, R_hat)
             # smr_scl('loss', loss_label, smr_tr)
             return R_hat, loss_label, err, T_logits
@@ -358,7 +358,7 @@ class Trainer:
     def __init__(self, dataset):
         self.ds = dataset
         
-    def train(self, sman, modules, num_epochs, batch_size):
+    def train(self, sman, modules, num_epochs, batch_size, pbar):
         sess = sman.sess
         last_epoch = sman.last_epoch
         
@@ -389,48 +389,50 @@ def make_model(modt, dim_t, start_rate, regularizer, epsilon_val, sigma, batch_s
     if modt=='float':
         return FloatModel(dim_x=784, dim_r=10, dim_t=dim_t, layers=[400,400], adv_train=adv_train, start_rate=start_rate, regularizer=regularizer, epsilon_val=epsilon_val)
 
-        
-reset_all()
-real_run = 1
-new_run = 1
 
-num_epochs = 1000
-batch_size_bnd = 100
-batch_size_trn = 100
-dset = 'digits' #digits/fashion
-modt = 'float' #set/baseline/float
-start_rate = 0.001
-regularizer = 0.001
-epsilon_val = .25
-adv_train = 1 #1=standard FGSM / 2=nearest neigh
-siamese = 0
-dim_t = 20
-sigma = 60
+def main(id=None):
+    reset_all()
+    real_run = 1
+    new_run = 1
 
-pbar = tqdm
-if len(sys.argv)>1:  # run array job on niagara
-    id = int(sys.argv[1])
-    choices = [
-               list(reversed([1,2,5,10,20,40,60,70,80,90,100,120,140,160,180,200,220,240,260,300,340,350,380,400])),
-               [1, 0],
-               ['float', 'baseline'],
-              ]
-    choice_dims = [len(it) for it in choices]
-    tot_ids = np.prod(choice_dims)
-    print('For [%d] jobs expecting IDs from [%d] to [%d] inclusive.'%(tot_ids, 0, tot_ids-1))
-    unrvl = np.unravel_index(id, choice_dims)
-    print('Received job ID [%d] unraveled to [%s].'%(id, str(unrvl)))
-    job_spec = [cho[pos] for cho, pos in zip(choices, unrvl)]
-    print('Spec: %s'%(str(job_spec)))
+    num_epochs = 1000
+    batch_size_bnd = 100
+    batch_size_trn = 100
+    dset = 'digits' #digits/fashion
+    modt = 'float' #set/baseline/float
+    start_rate = 0.001
+    regularizer = 0.001
+    epsilon_val = .25
+    adv_train = 1 #1=standard FGSM / 2=nearest neigh
+    siamese = 0
+    dim_t = 20
+    sigma = 60
 
-    dim_t, adv_train, modt = job_spec
-    pbar = tqal
+    pbar = tqdm
+    if id is not None:  # run array job on niagara
+        choices = [
+                   list(reversed([1,2,5,10,20,40,60,70,80,90,100,120,140,160,180,200,220,240,260,300,340,350,380,400])),
+                   [1, 0],
+                   ['float', 'baseline'],
+                  ]
+        choice_dims = [len(it) for it in choices]
+        tot_ids = np.prod(choice_dims)
+        print('For [%d] jobs expecting IDs from [%d] to [%d] inclusive.'%(tot_ids, 0, tot_ids-1))
+        unrvl = np.unravel_index(id, choice_dims)
+        print('Received job ID [%d] unraveled to [%s].'%(id, str(unrvl)))
+        job_spec = [cho[pos] for cho, pos in zip(choices, unrvl)]
+        print('Spec: %s'%(str(job_spec)))
+
+        dim_t, adv_train, modt = job_spec
+        pbar = tqal
+
+    run_id = '%s_%s_%dmbnd_%dmbtr_%ddim_t_%srate_%sregularizer_%sepsilon_val_%dsigma_%dadv_train_%dsiamese'%(dset, modt, batch_size_bnd, batch_size_trn, dim_t, format_e(start_rate), format_e(regularizer), str(epsilon_val), sigma, adv_train, siamese)
+    trainer = Trainer(load_mnist(dset))
+    model = make_model(modt, dim_t, start_rate, regularizer, epsilon_val, sigma, batch_size_bnd, adv_train, trainer.ds.train.labeled_ds, siamese)
+    sman = SessMan(run_id=run_id, new_run=new_run, real_run=real_run)
+    imageman = ImageMan(sman, model, trainer.ds.test)
+    sman.load()
+    trainer.train(sman, modules=[model, imageman], num_epochs=num_epochs, batch_size=batch_size_bnd+batch_size_trn, pbar=pbar)
 
 
-run_id = '%s_%s_%dmbnd_%dmbtr_%ddim_t_%srate_%sregularizer_%sepsilon_val_%dsigma_%dadv_train_%dsiamese'%(dset, modt, batch_size_bnd, batch_size_trn, dim_t, format_e(start_rate), format_e(regularizer), str(epsilon_val), sigma, adv_train, siamese)
-trainer = Trainer(load_mnist(dset))
-model = make_model(modt, dim_t, start_rate, regularizer, epsilon_val, sigma, batch_size_bnd, adv_train, trainer.ds.train.labeled_ds, siamese)
-sman = SessMan(run_id=run_id, new_run=new_run, real_run=real_run)
-imageman = ImageMan(sman, model, trainer.ds.test)
-sman.load()
-trainer.train(sman, modules=[model, imageman], num_epochs=num_epochs, batch_size=batch_size_bnd+batch_size_trn)
+if __name__ == '__main__': main()
