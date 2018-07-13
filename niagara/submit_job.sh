@@ -14,5 +14,5 @@ pwd
 
 source ../src/niagara/setup_env.sh
 echo 'executing run'
-srun python -u ../src/arrmpijob.py $SLURM_ARRAY_TASK_ID
+srun python -u ../src/array_mpi_job.py $SLURM_ARRAY_TASK_ID
 echo 'done run!'
