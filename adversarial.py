@@ -137,13 +137,10 @@ class BoundaryModel:
         W2_ll = [tf.reduce_mean(tf.square(vv)) for vv in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES) if 'var_W' in vv.name]
         weight_loss = tf.add_n(W2_ll)
         
-        if adv_train==1: adv_loss = loss_label_tilde
-        elif adv_train==2: adv_loss = tf.reduce_mean(tf.square(tf.stop_gradient(T_L)-T_L_tilde))
-        else: adv_loss = 0.
+        #elif adv_train==2: adv_loss = tf.reduce_mean(tf.square(tf.stop_gradient(T_L)-T_L_tilde))
+        loss_total = loss_label + loss_label_tilde
+        loss_opt = loss_label + (loss_label_tilde if adv_train else 0.) + regularizer*weight_loss
         
-        loss_total = loss_label + adv_loss
-        loss_opt = loss_total + regularizer*weight_loss
-            
         X_L_tilde2 = gen_adv_ex(loss_total, self.X_L, self.epsilon, 'X_L_tilde2')
         R_hat_T_tilde2, loss_label_tilde2, self.err_tilde2, bsize_tilde2, T_L_tilde2, T_B_tilde2 = classifier(X_L_tilde2, self.R_L, self.X_B, self.R_B, '_tilde2')
 
@@ -161,7 +158,7 @@ class BoundaryModel:
         with my_name_scope('training'):
             smr_scl('loss_label', loss_label, smr_tr)
             smr_scl('weight_loss', weight_loss, smr_tr)
-            smr_scl('adv_loss', adv_loss, smr_tr)
+            #smr_scl('adv_loss', adv_loss, smr_tr)
             smr_scl('loss_total', loss_total, smr_tr)
             smr_scl('loss', loss_opt, smr_tr)
             smr_scl('error', self.err, smr_tr)
@@ -237,9 +234,8 @@ class BaseModel:
         
         W2_ll = [tf.reduce_mean(tf.square(vv)) for vv in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES) if 'var_W' in vv.name]
             
-        adv_loss = loss_label_tilde if adv_train else 0.
-        loss_total = loss_label + adv_loss
-        loss_opt = loss_total + regularizer*tf.add_n(W2_ll)
+        loss_total = loss_label + loss_label_tilde
+        loss_opt = loss_label + (loss_label_tilde if adv_train else 0.) + regularizer*tf.add_n(W2_ll)
             
         X_tilde2 = gen_adv_ex(loss_total, self.X, self.epsilon, 'X_tilde2')
         R_hat_tilde2, loss_label_tilde2, self.err_tilde2, T_logits_tilde2 = self.classifier(X_tilde2, self.R, '_tilde2')
