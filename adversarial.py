@@ -237,9 +237,8 @@ class BaseModel:
         
         W2_ll = [tf.reduce_mean(tf.square(vv)) for vv in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES) if 'var_W' in vv.name]
             
-        adv_loss = loss_label_tilde if adv_train else 0.
-        loss_total = loss_label + adv_loss
-        loss_opt = loss_total + regularizer*tf.add_n(W2_ll)
+        loss_total = loss_label + loss_label_tilde
+        loss_opt = loss_label + (loss_label_tilde if adv_train else 0.) + regularizer*tf.add_n(W2_ll)
             
         X_tilde2 = gen_adv_ex(loss_total, self.X, self.epsilon, 'X_tilde2')
         R_hat_tilde2, loss_label_tilde2, self.err_tilde2, T_logits_tilde2 = self.classifier(X_tilde2, self.R, '_tilde2')
