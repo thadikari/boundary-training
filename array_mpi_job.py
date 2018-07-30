@@ -1,5 +1,3 @@
-from mpi4py import MPI
-import sys
 import adversarial
 
 
@@ -17,7 +15,10 @@ class StdStream:
         self.old.flush()
 
 
-def main():
+def main_mpi():
+    from mpi4py import MPI
+    import sys
+
     arrid = int(sys.argv[1]) if len(sys.argv)>1 else 0  # run array job on niagara
     comm = MPI.COMM_WORLD
     csiz = comm.Get_size()
@@ -32,4 +33,8 @@ def main():
     adversarial.main(id)
 
 
-if __name__ == '__main__': main()
+def main_seq():
+    for id in range(0, 10):
+        adversarial.main(id)
+
+if __name__ == '__main__': main_seq() # main_seq/main_mpi

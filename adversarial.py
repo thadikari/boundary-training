@@ -293,7 +293,7 @@ class BaselineModel(BaseModel):
             R_hat, R_hat_logits, theta_R_hat = create_layer(T, self.dim_r, tf.nn.softmax)
             R_hat = tf.identity(R_hat, name='R_hat'+suffx)
             # print theta_R_hat
-            loss_label = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=R, logits=R_hat_logits))
+            loss_label = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=R, logits=R_hat_logits))
             err = error_calc(R, R_hat)
             # smr_scl('loss', loss_label, smr_tr)
             return R_hat, loss_label, err, T_logits
@@ -313,7 +313,7 @@ class FloatModel(BaseModel):
             R_hat_logits = -dists2
             R_hat = tf.nn.softmax(R_hat_logits, name='R_hat'+suffx) #??sigma=1??
             # print theta_R_hat
-            loss_label = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=R, logits=R_hat_logits))
+            loss_label = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=R, logits=R_hat_logits))
             err = error_calc(R, R_hat)
             # smr_scl('loss', loss_label, smr_tr)
             return R_hat, loss_label, err, T_logits
