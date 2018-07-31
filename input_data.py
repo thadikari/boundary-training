@@ -90,7 +90,7 @@ from operator import mul
 
 class DataSet(object):
 
-  def __init__(self, images, labels, n_classes, one_hot):
+  def __init__(self, images, labels, n_classes, one_hot, flatten=True):
     assert images.shape[0] == labels.shape[0], (
           "images.shape: %s labels.shape: %s" % (images.shape,
                                                  labels.shape))
@@ -98,7 +98,7 @@ class DataSet(object):
 
     # Convert shape from [num examples, rows, columns, depth]
     # to [num examples, rows*columns] (assuming depth == 1)
-    images = images.reshape(images.shape[0], reduce(mul, images.shape[1:], 1))
+    if flatten: images = images.reshape(images.shape[0], reduce(mul, images.shape[1:], 1))
     # Convert from [0, 255] -> [0.0, 1.0].
     images = images.astype(numpy.float32)
     self._images = images
@@ -143,7 +143,7 @@ class DataSet(object):
     return self._images[start:end], self._labels[start:end]
 
 class SemiDataSet(object):
-    def __init__(self, images, labels, n_labeled, n_classes, one_hot):
+    def __init__(self, images, labels, n_labeled, n_classes, one_hot, flatten=True):
         #self.n_unlabeled = n_unlabeled
         num_examples = len(labels)
 
@@ -162,13 +162,13 @@ class SemiDataSet(object):
                 i_labeled += list(i)
             l_images = images[i_labeled]
             l_labels = labels[i_labeled]
-            self.labeled_ds = DataSet(l_images, l_labels, n_classes, one_hot=one_hot)
+            self.labeled_ds = DataSet(l_images, l_labels, n_classes, one_hot=one_hot, flatten=flatten)
         
         else:
             self.n_labeled = n_labeled
-            self.labeled_ds = DataSet(images, labels, n_classes, one_hot=one_hot)
+            self.labeled_ds = DataSet(images, labels, n_classes, one_hot=one_hot, flatten=flatten)
         
-        self.unlabeled_ds = DataSet(images, labels, n_classes, one_hot=one_hot)
+        self.unlabeled_ds = DataSet(images, labels, n_classes, one_hot=one_hot, flatten=flatten)
 
 
     def next_batch(self, batch_size):
@@ -232,6 +232,60 @@ def make_moons(n_labeled, n_unlabeled, n_test, one_hot=True, noise=None):
     data_sets.train = SemiDataSet(train_images, train_labels, n_labeled, n_unlabeled, n_classes, one_hot=one_hot)
     data_sets.test = DataSet(test_images, test_labels, n_classes, one_hot=one_hot)
     
+    #plt.scatter(d1[:,0], d1[:,1], c=l1)
+    #plt.show()
+    return data_sets
+
+
+import pickle
+
+# Function to load a batch into memory
+def load_batch(data_dir, file_name):
+    with open(os.path.join(data_dir, file_name), mode='rb') as file:
+        batch = pickle.load(file, encoding='latin1')
+    feats = batch['data'].reshape((len(batch['data']), 3, 32, 32)).transpose(0, 2, 3, 1)
+    lbls = batch['labels']
+    return feats, lbls
+
+
+def normalize(x):
+    return x / 255.
+
+
+from sklearn import preprocessing
+lb = preprocessing.LabelBinarizer().fit(range(10))
+def one_hot_encode(x):
+    global lb
+    return lb.transform(x)
+
+cifar10_dir='cifar-10-batches-py'
+
+def read_cifar10(data_path, one_hot=1):
+    class DataSets(object): pass
+    data_sets = DataSets()
+
+    ffs, lls = [], []
+
+    data_dir = os.path.join(data_path, cifar10_dir)
+    for i in range(1, 6):
+        feats, lbls = load_batch(data_dir, 'data_batch_%i' % i)
+        norm_feats = normalize(feats)
+        ffs.append(norm_feats)
+        lls.append(lbls)
+
+    train_images = np.concatenate(ffs)
+    train_labels = np.array([item for sublist in lls for item in sublist])
+
+    n_labeled = -1
+    n_classes = np.amax(train_labels)+1
+    data_sets.train = SemiDataSet(train_images, train_labels, n_labeled, n_classes, one_hot=one_hot, flatten=False)
+
+    test_images, test_labels = load_batch(data_dir, 'test_batch')
+    test_images = normalize(test_images)
+    test_labels = np.array(test_labels)
+    data_sets.test = DataSet(test_images, test_labels, n_classes, one_hot=one_hot, flatten=False)
+
+    #print(X_train.shape, R_train.shape)
     #plt.scatter(d1[:,0], d1[:,1], c=l1)
     #plt.show()
     return data_sets

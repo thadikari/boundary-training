@@ -61,7 +61,7 @@ class BoundaryModel:
         self.R = tf.concat([self.R_L, self.R_B], axis=0, name='R')
         
         num__L, num__B = tf.shape(self.X_L)[0], tf.shape(self.X_B)[0]
-        __L, __B = lambda(dat): dat[:num__L], lambda(dat): dat[num__L:]
+        __L, __B = lambda dat: dat[:num__L], lambda dat: dat[num__L:]
         
         with my_name_scope('classifier'):
             self.T, self.T_logits, self.theta_T = create_fcnet(self.X, layers+[dim_t], tf.nn.relu, actvn_fn)
@@ -88,7 +88,9 @@ def calc_BT_err(btree, T, R):
     test_error = 100.*err/T.shape[0]
     return test_error
 
-    
+
+chkpts = [200, 600]
+
 class BoundaryOptimizer:
     def __init__(self, model, start_rate, batch_size_bnd, batch_size_trn, D_L):
         self.model = model
@@ -118,7 +120,7 @@ class BoundaryOptimizer:
             self.sub_list = []
             learning_rate = tf.Variable(start_rate, trainable=False, name='learning_rate')
             smr_scl('learning_rate', learning_rate, self.smr_ts)
-            self.sub_list.append(RateUpdater(start_rate, learning_rate))
+            self.sub_list.append(RateUpdater(start_rate, learning_rate, chkpts))
             self.opt = tf.train.AdamOptimizer(learning_rate, beta1=.5).minimize(loss=loss_label, var_list=model.theta_T)
             
         self.summary_train_op = tf.summary.merge(self.smr_tr)
@@ -290,7 +292,7 @@ class TreeBatchOptimizer(BoundaryOptimizer):
             T[self.batch_size_bnd:tot], X[self.batch_size_bnd:tot],
             R[self.batch_size_bnd:tot])
 
-                
+
 class BaselineModel:
     def __init__(self, dim_x, dim_r, dim_t, layers):
 
@@ -300,6 +302,19 @@ class BaselineModel:
         with my_name_scope('classifier'):
             self.R_hat, self.R_hat_logits, self.theta_R_hat = create_fcnet(self.X, layers+[dim_t, dim_r], tf.nn.relu, tf.nn.softmax)
             
+        self.T = self.R_hat_logits
+
+
+import cnn_model
+class BaselineCNNModel:
+    def __init__(self):
+        self.X = tf.placeholder(tf.float32, [None, 32, 32, 3], name='X')
+        self.R = tf.placeholder(tf.float32, [None, 10], name='R')
+
+        with my_name_scope('classifier'):
+            self.R_hat_logits = cnn_model.conv_net(self.X)
+            self.R_hat = tf.nn.softmax(self.R_hat_logits)
+
         self.T = self.R_hat_logits
             
                 
@@ -322,8 +337,8 @@ class BaselineOptimizer:
             self.sub_list = []
             learning_rate = tf.Variable(start_rate, trainable=False, name='learning_rate')
             smr_scl('learning_rate', learning_rate, smr_ts)
-            self.sub_list.append(RateUpdater(start_rate, learning_rate))
-            self.opt = tf.train.AdamOptimizer(learning_rate, beta1=.5).minimize(loss=loss_label, var_list=model.theta_R_hat)
+            self.sub_list.append(RateUpdater(start_rate, learning_rate, chkpts))
+            self.opt = tf.train.AdamOptimizer(learning_rate, beta1=.5).minimize(loss=loss_label)
             
         self.summary_train_op = tf.summary.merge(smr_tr)
         self.summary_test_op = tf.summary.merge(smr_ts)
@@ -464,5 +479,10 @@ def make_model(modt, start_rate, sigma, batch_size_bnd, batch_size_trn, stop_gra
 
     if modt=='baseline':
         model = BaselineModel(dim_x=784, dim_r=10, dim_t=20, layers=[400,400])
+        optimizer = BaselineOptimizer(model, start_rate)
+        return model, optimizer
+
+    if modt=='baseline_cnn':
+        model = BaselineCNNModel()
         optimizer = BaselineOptimizer(model, start_rate)
         return model, optimizer
