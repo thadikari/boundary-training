@@ -379,15 +379,16 @@ class Trainer:
         
         
 def make_model(modt, dim_t, start_rate, regularizer, epsilon_val, sigma, batch_size_bnd, adv_train, D_L, siamese):
+    dim_r = D_L.labels.shape[1]
     if modt=='set':
         actvn_fn = tf.identity
-        return BoundaryModel(dim_x=784, dim_r=10, dim_t=dim_t, layers=[400,400], adv_train=adv_train, actvn_fn=actvn_fn, sigma=sigma, start_rate=start_rate, regularizer=regularizer, batch_size_bnd=batch_size_bnd, epsilon_val=epsilon_val, siamese=siamese)
+        return BoundaryModel(dim_x=784, dim_r=dim_r, dim_t=dim_t, layers=[400,400], adv_train=adv_train, actvn_fn=actvn_fn, sigma=sigma, start_rate=start_rate, regularizer=regularizer, batch_size_bnd=batch_size_bnd, epsilon_val=epsilon_val, siamese=siamese)
         
     if modt=='baseline':
-        return BaselineModel(dim_x=784, dim_r=10, dim_t=dim_t, layers=[400,400], adv_train=adv_train, start_rate=start_rate, regularizer=regularizer, epsilon_val=epsilon_val)
+        return BaselineModel(dim_x=784, dim_r=dim_r, dim_t=dim_t, layers=[400,400], adv_train=adv_train, start_rate=start_rate, regularizer=regularizer, epsilon_val=epsilon_val)
         
     if modt=='float':
-        return FloatModel(dim_x=784, dim_r=10, dim_t=dim_t, layers=[400,400], adv_train=adv_train, start_rate=start_rate, regularizer=regularizer, epsilon_val=epsilon_val)
+        return FloatModel(dim_x=784, dim_r=dim_r, dim_t=dim_t, layers=[400,400], adv_train=adv_train, start_rate=start_rate, regularizer=regularizer, epsilon_val=epsilon_val)
 
 
 def main(id=None):
@@ -398,12 +399,12 @@ def main(id=None):
     num_epochs = 1000
     batch_size_bnd = 100
     batch_size_trn = 100
-    dset = 'digits' #digits/fashion
+    dset = 'digits' #digits/fashion/fashion_2d
     modt = 'float' #set/baseline/float
     start_rate = 0.001
     regularizer = 0.001
     epsilon_val = .25
-    adv_train = 1 #1=standard FGSM / 2=nearest neigh
+    adv_train = 0 #1=standard FGSM / 2=nearest neigh
     siamese = 0
     dim_t = 20
     sigma = 60
@@ -429,7 +430,7 @@ def main(id=None):
     run_id = '%s_%s_%dmbnd_%dmbtr_%ddim_t_%srate_%sregularizer_%sepsilon_val_%dsigma_%dadv_train_%dsiamese'%(dset, modt, batch_size_bnd, batch_size_trn, dim_t, format_e(start_rate), format_e(regularizer), str(epsilon_val), sigma, adv_train, siamese)
     trainer = Trainer(load_mnist(dset))
     model = make_model(modt, dim_t, start_rate, regularizer, epsilon_val, sigma, batch_size_bnd, adv_train, trainer.ds.train.labeled_ds, siamese)
-    sman = SessMan(run_id=run_id, new_run=new_run, real_run=real_run)
+    sman = SessMan(run_id=run_id, new_run=new_run, real_run=real_run, cache_root='../cache')
     imageman = ImageMan(sman, model, trainer.ds.test)
     sman.load()
     trainer.train(sman, modules=[model, imageman], num_epochs=num_epochs, batch_size=batch_size_bnd+batch_size_trn, pbar=pbar)

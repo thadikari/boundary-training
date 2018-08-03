@@ -137,6 +137,7 @@ def load_mnist(dset, n_labeled=-1, data_root=os.path.join('..', 'data')):
     data_path = os.path.join(data_root, dset)
     if dset=='digits': return input_data.read_mnist(data_path, one_hot=True, SOURCE_URL=input_data.SOURCE_DIGITS, n_labeled=n_labeled)
     if dset=='fashion': return input_data.read_mnist(data_path, one_hot=True, SOURCE_URL=input_data.SOURCE_FASHION, n_labeled=n_labeled)
+    if dset=='fashion_2d': return input_data.read_mnist(os.path.join(data_root, 'fashion'), one_hot=True, SOURCE_URL=input_data.SOURCE_FASHION, n_labeled=n_labeled, binary_zero=[0,2,3,4,6])
     if dset=='cifar10': return input_data.read_cifar10(data_path)
 
 time_id = lambda: time.strftime("%Y%m%d-%H:%M:%S", time.gmtime(time.mktime(time.gmtime())))

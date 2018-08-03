@@ -180,7 +180,14 @@ class SemiDataSet(object):
         images = numpy.vstack([labeled_images, unlabeled_images])
         return labeled_images, labels, unlabeled_images
 
-def read_mnist(train_dir, n_labeled=-1, one_hot=False, SOURCE_URL=SOURCE_DIGITS):
+
+def binarize(labels, binary_zero):
+    new_labels = [-99]*len(labels)
+    for i, it in enumerate(labels):
+        new_labels[i] = int(it not in binary_zero)
+    return np.array(new_labels)
+
+def read_mnist(train_dir, n_labeled=-1, one_hot=False, SOURCE_URL=SOURCE_DIGITS, binary_zero=None):
   class DataSets(object): pass
   data_sets = DataSets()
 
@@ -194,13 +201,15 @@ def read_mnist(train_dir, n_labeled=-1, one_hot=False, SOURCE_URL=SOURCE_DIGITS)
   train_images = extract_images(local_file)
 
   local_file = maybe_download(TRAIN_LABELS, train_dir, SOURCE_URL)
-  train_labels = extract_labels(local_file)#, one_hot=one_hot)
+  train_labels = extract_labels(local_file)
+  if binary_zero: train_labels = binarize(train_labels, binary_zero)
 
   local_file = maybe_download(TEST_IMAGES, train_dir, SOURCE_URL)
   test_images = extract_images(local_file)
 
   local_file = maybe_download(TEST_LABELS, train_dir, SOURCE_URL)
-  test_labels = extract_labels(local_file)#, one_hot=one_hot)
+  test_labels = extract_labels(local_file)
+  if binary_zero: test_labels = binarize(test_labels, binary_zero)
 
   validation_images = train_images[:VALIDATION_SIZE]
   validation_labels = train_labels[:VALIDATION_SIZE]
