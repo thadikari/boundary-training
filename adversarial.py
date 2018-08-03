@@ -86,7 +86,7 @@ def gen_adv_ex(loss_term, inp_X, eps, name):
 
     
 class BoundaryModel:
-    def __init__(self, dim_x, dim_r, dim_t, layers, adv_train, actvn_fn, sigma, start_rate, regularizer, batch_size_bnd, epsilon_val, siamese):
+    def __init__(self, dim_x, dim_t, dim_r, trans_func, adv_train, sigma, start_rate, regularizer, batch_size_bnd, epsilon_val, siamese):
     
         self.siamese = siamese
         self.batch_size_bnd = batch_size_bnd
@@ -107,8 +107,7 @@ class BoundaryModel:
             R = tf.concat([R_L, R_B], axis=0, name='R')
             
             #with my_name_scope('classifier'):
-            T, T_logits, theta_T = create_fcnet(X, layers+[dim_t], tf.nn.relu, actvn_fn)
-            #print(theta_T)
+            T, T_logits, theta_T = trans_func(X)
                 
             #with my_name_scope('projection'):
             T_L, T_B = __L(T, 'T_L'+suffx), __B(T, 'T_B'+suffx)
@@ -216,9 +215,9 @@ class BoundaryModel:
         
                 
 class BaseModel:
-    def __init__(self, dim_x, dim_r, dim_t, layers, adv_train, start_rate, regularizer, epsilon_val):
+    def __init__(self, dim_x, dim_t, dim_r, trans_func, adv_train, start_rate, regularizer, epsilon_val):
         
-        self.init(dim_r, dim_t, layers)
+        self.init(dim_t, dim_r, trans_func)
         self.epsilon_val = epsilon_val
         
         # model related code
@@ -283,12 +282,13 @@ class BaseModel:
         
 
 class BaselineModel(BaseModel):
-    def init(self, dim_r, dim_t, layers):
-        self.dim_r, self.dim_t, self.layers = dim_r, dim_t, layers
+    def init(self, dim_t, dim_r, trans_func):
+        self.dim_r, self.trans_func = dim_r, trans_func
 
     def classifier(self, X, R, suffx):
+        T, T_logits, theta_T = self.trans_func(X)
+
         with my_name_scope('classifier'):
-            T, T_logits, theta_T = create_fcnet(X, self.layers+[self.dim_t], tf.nn.relu, tf.nn.relu)
             T_logits = tf.identity(T_logits, name='T_logits'+suffx)
             R_hat, R_hat_logits, theta_R_hat = create_layer(T, self.dim_r, tf.nn.softmax)
             R_hat = tf.identity(R_hat, name='R_hat'+suffx)
@@ -300,15 +300,15 @@ class BaselineModel(BaseModel):
 
 
 class FloatModel(BaseModel):
-    def init(self, dim_r, dim_t, layers):
-        self.dim_r, self.dim_t, self.layers = dim_r, dim_t, layers
+    def init(self, dim_t, dim_r, trans_func):
+        self.trans_func = trans_func
         self.targets = tf.Variable(tf.random_normal((dim_r, dim_t)), name='targets')#shape=(dim_r, dim_t)
 
     def classifier(self, X, R, suffx):
-        with my_name_scope('classifier'):
-            T, T_logits, theta_T = create_fcnet(X, self.layers+[self.dim_t], tf.nn.relu, tf.identity) #??identity
-            T_logits = tf.identity(T_logits, name='T_logits'+suffx)
+        T, T_logits, theta_T = self.trans_func(X)
 
+        with my_name_scope('classifier'):
+            T_logits = tf.identity(T_logits, name='T_logits'+suffx)
             dists2 = pdist2(T_logits, self.targets)#?? use pdist???
             R_hat_logits = -dists2
             R_hat = tf.nn.softmax(R_hat_logits, name='R_hat'+suffx) #??sigma=1??
@@ -379,16 +379,25 @@ class Trainer:
         
         
 def make_model(modt, dim_t, start_rate, regularizer, epsilon_val, sigma, batch_size_bnd, adv_train, D_L, siamese):
-    dim_r = D_L.labels.shape[1]
+    dim_x, dim_r = D_L.images.shape[1], D_L.labels.shape[1]
+    def get_trans_func():
+        actvn_fn = tf.identity  # tf.nn.relu, tf.identity
+        layers = [400, 400] + [dim_t]
+        def trans_func(inp):
+            with my_name_scope('transfunc'):
+                T, T_logits, theta_T = create_fcnet(inp, layers, tf.nn.relu, actvn_fn)
+                return T, T_logits, theta_T
+        return trans_func
+
+    trans_func = get_trans_func()
     if modt=='set':
-        actvn_fn = tf.identity
-        return BoundaryModel(dim_x=784, dim_r=dim_r, dim_t=dim_t, layers=[400,400], adv_train=adv_train, actvn_fn=actvn_fn, sigma=sigma, start_rate=start_rate, regularizer=regularizer, batch_size_bnd=batch_size_bnd, epsilon_val=epsilon_val, siamese=siamese)
+        return BoundaryModel(dim_x=dim_x, dim_t=dim_t, dim_r=dim_r, trans_func=trans_func, adv_train=adv_train, sigma=sigma, start_rate=start_rate, regularizer=regularizer, batch_size_bnd=batch_size_bnd, epsilon_val=epsilon_val, siamese=siamese)
         
     if modt=='baseline':
-        return BaselineModel(dim_x=784, dim_r=dim_r, dim_t=dim_t, layers=[400,400], adv_train=adv_train, start_rate=start_rate, regularizer=regularizer, epsilon_val=epsilon_val)
+        return BaselineModel(dim_x=dim_x, dim_t=dim_t, dim_r=dim_r, trans_func=trans_func, adv_train=adv_train, start_rate=start_rate, regularizer=regularizer, epsilon_val=epsilon_val)
         
     if modt=='float':
-        return FloatModel(dim_x=784, dim_r=dim_r, dim_t=dim_t, layers=[400,400], adv_train=adv_train, start_rate=start_rate, regularizer=regularizer, epsilon_val=epsilon_val)
+        return FloatModel(dim_x=dim_x, dim_t=dim_t, dim_r=dim_r, trans_func=trans_func, adv_train=adv_train, start_rate=start_rate, regularizer=regularizer, epsilon_val=epsilon_val)
 
 
 def main(id=None):
