@@ -2,7 +2,9 @@ import tensorflow as tf
 from tqdm import tqdm
 import numpy as np
 import sys
-    
+
+import cleverhans
+from cleverhans.attacks import FastGradientMethod
 from boundary import build_boundary_set_ex
 from common import *
 
@@ -214,6 +216,12 @@ class BoundaryModel:
         add_summary(sess.run(test_op, feed_dict={self.X_L: X, self.R_L: R, self.X_B:self.bset[0], self.R_B:self.bset[1], self.epsilon:self.epsilon_val}), i)
         
                 
+class CHModel(cleverhans.model.Model):
+    def __init__(self, model): self.model = model
+    def fprop(self, X, **kwargs):
+        R_hat, _, _, _, R_hat_logits = self.model.classifier(X, self.model.R, 'cleverh')
+        return {'logits': R_hat_logits, 'probs': R_hat}
+
 class BaseModel:
     def __init__(self, dim_x, dim_t, dim_r, trans_func, adv_train, start_rate, regularizer, epsilon_val):
         
@@ -225,9 +233,11 @@ class BaseModel:
         self.X = tf.placeholder_with_default(tf.zeros([0,dim_x], tf.float32), shape=(None, dim_x), name='X')
         self.R = tf.placeholder_with_default(tf.zeros([0,dim_r], tf.float32), shape=(None, dim_r), name='R')
         
-        R_hat, loss_label, self.err, T_logits = self.classifier(self.X, self.R, '')
-        X_tilde = gen_adv_ex(loss_label, self.X, self.epsilon, 'X_tilde')
-        R_hat_tilde, loss_label_tilde, self.err_tilde, T_logits_tilde = self.classifier(X_tilde, self.R, '_tilde')
+        R_hat, loss_label, self.err, T_logits, _ = self.classifier(self.X, self.R, '')
+        fgsm = FastGradientMethod(CHModel(self))
+        fgsm_params = {'eps': self.epsilon, 'clip_min': 0., 'clip_max': 1.}
+        X_tilde = fgsm.generate(self.X, **fgsm_params)
+        R_hat_tilde, loss_label_tilde, self.err_tilde, T_logits_tilde, _ = self.classifier(X_tilde, self.R, '_tilde')
         
         self.im_X, self.im_X_tilde = self.X, X_tilde
         
@@ -237,7 +247,7 @@ class BaseModel:
         loss_opt = loss_label + (loss_label_tilde if adv_train else 0.) + regularizer*tf.add_n(W2_ll)
             
         X_tilde2 = gen_adv_ex(loss_total, self.X, self.epsilon, 'X_tilde2')
-        R_hat_tilde2, loss_label_tilde2, self.err_tilde2, T_logits_tilde2 = self.classifier(X_tilde2, self.R, '_tilde2')
+        R_hat_tilde2, loss_label_tilde2, self.err_tilde2, T_logits_tilde2, _ = self.classifier(X_tilde2, self.R, '_tilde2')
         self.im_X_tilde2 = X_tilde2
 
         # optimizing related code
@@ -296,7 +306,7 @@ class BaselineModel(BaseModel):
             loss_label = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=R, logits=R_hat_logits))
             err = error_calc(R, R_hat)
             # smr_scl('loss', loss_label, smr_tr)
-            return R_hat, loss_label, err, T_logits
+            return R_hat, loss_label, err, T_logits, R_hat_logits
 
 
 class FloatModel(BaseModel):
@@ -316,7 +326,7 @@ class FloatModel(BaseModel):
             loss_label = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=R, logits=R_hat_logits))
             err = error_calc(R, R_hat)
             # smr_scl('loss', loss_label, smr_tr)
-            return R_hat, loss_label, err, T_logits
+            return R_hat, loss_label, err, T_logits, R_hat_logits
 
 
 class ImageMan:
