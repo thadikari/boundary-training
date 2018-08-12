@@ -4,7 +4,7 @@ import numpy as np
 import sys
 
 import cleverhans
-from cleverhans.attacks import FastGradientMethod
+import cleverhans.attacks as attacks
 from boundary import build_boundary_set_ex
 from common import *
 
@@ -214,8 +214,11 @@ class BoundaryModel:
     def on_image_test(self, sess, add_summary, i, X, R, test_op):
         if self.siamese: return
         add_summary(sess.run(test_op, feed_dict={self.X_L: X, self.R_L: R, self.X_B:self.bset[0], self.R_B:self.bset[1], self.epsilon:self.epsilon_val}), i)
-        
-                
+
+
+attack_func = attacks.FastGradientMethod
+attack_params = {'eps': self.epsilon, 'clip_min': 0., 'clip_max': 1.}
+
 class CHModel(cleverhans.model.Model):
     def __init__(self, model): self.model = model
     def fprop(self, X, **kwargs):
@@ -234,9 +237,7 @@ class BaseModel:
         self.R = tf.placeholder_with_default(tf.zeros([0,dim_r], tf.float32), shape=(None, dim_r), name='R')
         
         R_hat, loss_label, self.err, T_logits, _ = self.classifier(self.X, self.R, '')
-        fgsm = FastGradientMethod(CHModel(self))
-        fgsm_params = {'eps': self.epsilon, 'clip_min': 0., 'clip_max': 1.}
-        X_tilde = fgsm.generate(self.X, **fgsm_params)
+        X_tilde = attack_func(CHModel(self)).generate(self.X, **attack_params)
         R_hat_tilde, loss_label_tilde, self.err_tilde, T_logits_tilde, _ = self.classifier(X_tilde, self.R, '_tilde')
         
         self.im_X, self.im_X_tilde = self.X, X_tilde
@@ -449,7 +450,7 @@ def main(id=None):
     run_id = '%s_%s_%dmbnd_%dmbtr_%ddim_t_%srate_%sregularizer_%sepsilon_val_%dsigma_%dadv_train_%dsiamese'%(dset, modt, batch_size_bnd, batch_size_trn, dim_t, format_e(start_rate), format_e(regularizer), str(epsilon_val), sigma, adv_train, siamese)
     trainer = Trainer(load_mnist(dset))
     model = make_model(modt, dim_t, start_rate, regularizer, epsilon_val, sigma, batch_size_bnd, adv_train, trainer.ds.train.labeled_ds, siamese)
-    sman = SessMan(run_id=run_id, new_run=new_run, real_run=real_run, cache_root='../cache')
+    sman = SessMan(run_id=run_id, new_run=new_run, real_run=real_run, cache_root='../cache_VNet1_CNet_digits_chans')
     imageman = ImageMan(sman, model, trainer.ds.test)
     sman.load()
     trainer.train(sman, modules=[model, imageman], num_epochs=num_epochs, batch_size=batch_size_bnd+batch_size_trn, pbar=pbar)

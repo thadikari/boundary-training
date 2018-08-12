@@ -32,8 +32,8 @@ def pdist2(X, Y=None): # dimensions should be, X: NX x C and Y: NY x C
     
 class my_name_scope(object):
     def __init__(self, name):
-        cur = tf.get_default_graph().get_name_scope()
-        self.ns = tf.name_scope(cur + ('' if len(cur)==0 else '/') + name + '/')
+        cur = tf.get_variable_scope().name
+        self.ns = tf.variable_scope(cur + ('' if len(cur)==0 else '/') + name + '/')
     def __enter__(self):
         self.ns.__enter__()
         return self.ns
