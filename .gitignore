@@ -1,2 +1,3 @@
+nohup*
 *.pyc
 __pycache__/*

@@ -1,24 +1,24 @@
 #!/opt/tensorflow/bin/python
 
 from model import *
-import input_data
 
-#for sigma in [45,55,60,70]:
 reset_all()
 real_run = 1
 new_run = 1
-num_epochs = 1000
-actvn_fn = tf.identity
-sigma = 1
-btree_dists_in_ambient = 0
 
-model = Model(dim_x=784, dim_r=10, dim_t=20,
-              layers=[400,400], actvn_fn=actvn_fn, sigma=sigma
-              )
-optimizer = Optimizer(model, btree_dists_in_ambient=btree_dists_in_ambient)
+num_epochs = 2000
+batch_size_bnd = 100
+batch_size_trn = 100
+dset = 'cifar10' #digits/fashion/cifar10
+modt = 'baseline_cnn' #set/tree/tree_bch/baseline/baseline_cnn
+start_rate = 0.001
+stop_grad = 0
+sigma = 60
 
-sman = SessMan(run_id='actvn_%s_sigma_%d_benchmark'%(actvn_fn.__name__,1), new_run=new_run, real_run=real_run)
-trainer = Trainer(input_data.read_mnist("../data", one_hot=True))
-imageman = ImageMan(sman, model, trainer.ds.test)
+run_id = '%s_%s_%dmbnd_%dmbtr_%srate_%dsigma_%dstop_grad'%(dset, modt, batch_size_bnd, batch_size_trn, format_e(start_rate), sigma, stop_grad)
+trainer = Trainer(load_mnist(dset))
+model, optimizer = make_model(modt, start_rate, sigma, batch_size_bnd, batch_size_trn, stop_grad, trainer.ds.train.labeled_ds)
+sman = SessMan(run_id=run_id, new_run=new_run, real_run=real_run, cache_root='../cache_cifar10')
+#imageman = ImageMan(sman, model, trainer.ds.test)
 sman.load()
-trainer.train(sman, modules=[optimizer, imageman], num_epochs=num_epochs, batch_size=100)
+trainer.train(sman, modules=[optimizer], num_epochs=num_epochs, batch_size=batch_size_bnd+batch_size_trn)

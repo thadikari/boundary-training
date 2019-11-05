@@ -3,57 +3,107 @@ from scipy import spatial
 
 
 class Node:
-    def __init__(self, y, l):
-        self.value = np.array(y)
-        self.label = l
+    def __init__(self, node_index, t, l, x):
+        self.node_index = node_index
         self.child_nodes = []
-        self.child_values = np.zeros(shape=(0, len(y)))
+        self.T = np.array([t])
+        self.L = np.array([l])
+        self.X = np.array([x])
 
-    def add(self, y, l):
-        self.child_nodes.append(Node(y, l))
-        self.child_values = np.vstack([self.child_values, y])
+    def add(self, node_index, t, l, x):
+        self.child_nodes.append(Node(node_index, t, l, x))
+        self.T = np.vstack([self.T, t])
+        self.L = np.vstack([self.L, l])
+        self.X = np.vstack([self.X, x])
 
-    def size(self):
-        return len(self.child_nodes)
+    @property
+    def label(self): return self.L[0]
+    @property
+    def num_children(self): return len(self.child_nodes)
 
 
+pdists__ = lambda arr, vec: spatial.distance.cdist(arr, np.array([vec]), 'euclidean')
+
+def softmax(x):
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum(axis=1,keepdims=1)
+    #print softmax_2(np.array([[1,2,3],[0,0,0],[.1,10,-199],[10,10,10]]))
+
+    
 class Tree:
-    def __init__(self, dim, k):
+    def __init__(self):
         self.root = None
         self.size = 0
-        self.k = k
 
-    def train(self, y, l):
+    def train(self, t, l, x):
         if self.root is None:
-            self.root = Node(y, l)
+            self.root = Node(0, t, l, x)
             self.size = 1
             return True
         else:
-            v = self.query(y)
-            if v.label == l:
+            v = self.query(t)
+            if np.argmax(v.label) == np.argmax(l):
                 return False
+            else:
+                v.add(self.size, t, l, x)
+                self.size += 1
+                return True
 
-            self.size += 1
-            v.add(y, l)
-            return True
+    def query__(self, v, t):
+        return np.argmin(pdists__(v.T, t)) - 1
 
-    def query(self, y):
+    def query(self, t):
         v = self.root
         while 1:
-
-            if v.size() == 0:
-                return v
-
-            child_dists = spatial.distance.cdist(
-                v.child_values, np.array([y]), 'euclidean')
-            child_ind = np.argmin(child_dists)
-            child_min = child_dists[child_ind]
-            parent_dist = spatial.distance.euclidean(v.value, y)
-
-            if (v.size() < self.k) & (parent_dist < child_min):
+            if v.num_children == 0:
                 return v
             else:
-                v = v.child_nodes[child_ind]
+                ind = self.query__(v, t)
+                if ind<0:
+                    return v
+                else:
+                    v = v.child_nodes[ind]
+
+    def query_parent(self, t):
+        v = self.root
+        p = v
+        while 1:
+            if v.num_children == 0:
+                return p
+            else:
+                ind = self.query__(v, t)
+                if ind<0:
+                    return p
+                else:
+                    p = v
+                    v = v.child_nodes[ind]
+
+    def query_neighbors(self, t):
+        p = self.query_parent(t)
+        return p.X, p.L
+    
+    def query_neighbor_inds(self, t):
+        p = self.query_parent(t)
+        inds = [child.node_index for child in p.child_nodes]
+        inds.append(p.node_index)
+        return np.array(inds)
+
+    def infer_probs(self, t, sigma):
+        p = self.query_parent(t)
+        dists = pdists__(p.T, t).T
+        smax = softmax(-dists/sigma)
+        return np.matmul(smax, p.L)[0]
+    
+def build_boundary_tree_ex(data, labels, meta):
+    result = []
+    b_tree = Tree()
+    for t, l, x in zip(data, labels, meta):
+        result.append(b_tree.train(t, l, x))
+    return b_tree, result
+
+    
+def build_boundary_tree(data, labels, meta):
+    return build_boundary_tree_ex(data, labels, meta)[0]
 
 
 class Forest:
